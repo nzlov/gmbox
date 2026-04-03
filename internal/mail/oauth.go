@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	microsoftAuthorizeScope = "offline_access openid email User.Read https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send"
+	microsoftAuthorizeScope = "offline_access openid email https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send"
 	oauthExpirySkew         = 2 * time.Minute
 )
 
@@ -31,6 +31,7 @@ func MicrosoftOAuthScope() string {
 type microsoftTokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
 	ExpiresIn    int64  `json:"expires_in"`
 	TokenType    string `json:"token_type"`
 }
@@ -39,6 +40,13 @@ type microsoftProfile struct {
 	DisplayName       string `json:"displayName"`
 	Mail              string `json:"mail"`
 	UserPrincipalName string `json:"userPrincipalName"`
+}
+
+type microsoftIDTokenClaims struct {
+	Name              string `json:"name"`
+	Email             string `json:"email"`
+	PreferredUsername string `json:"preferred_username"`
+	UPN               string `json:"upn"`
 }
 
 // MicrosoftOAuthEnabled 判断当前运行环境是否已配置微软 OAuth 所需密钥。
@@ -112,7 +120,7 @@ func (s *Service) UpsertMicrosoftOAuthAccountWithPKCE(ctx context.Context, code 
 	if err != nil {
 		return nil, err
 	}
-	profile, err := s.fetchMicrosoftProfile(ctx, token.AccessToken)
+	profile, err := microsoftProfileFromIDToken(token.IDToken)
 	if err != nil {
 		return nil, err
 	}
@@ -232,27 +240,38 @@ func (s *Service) storeOAuthToken(account *model.MailAccount, token microsoftTok
 	return nil
 }
 
-// fetchMicrosoftProfile 读取微软账户基础资料，用于自动填充邮箱名称和地址。
-func (s *Service) fetchMicrosoftProfile(ctx context.Context, accessToken string) (*microsoftProfile, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName", nil)
+// microsoftProfileFromIDToken 从 id_token 提取邮箱与显示名，避免把 Graph 与 Outlook 作用域混在同一次授权中。
+func microsoftProfileFromIDToken(idToken string) (*microsoftProfile, error) {
+	parts := strings.Split(strings.TrimSpace(idToken), ".")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("微软 token 响应缺少可解析的 id_token")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("解析微软 id_token 失败: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+accessToken)
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("获取微软用户资料失败: %w", err)
+	var claims microsoftIDTokenClaims
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return nil, fmt.Errorf("解析微软 id_token 声明失败: %w", err)
 	}
-	defer response.Body.Close()
-	if response.StatusCode >= http.StatusBadRequest {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
-		return nil, fmt.Errorf("获取微软用户资料失败: %s", strings.TrimSpace(string(body)))
+	profile := &microsoftProfile{
+		DisplayName:       strings.TrimSpace(claims.Name),
+		Mail:              strings.TrimSpace(claims.Email),
+		UserPrincipalName: strings.TrimSpace(claims.PreferredUsername),
 	}
-	var profile microsoftProfile
-	if err := json.NewDecoder(response.Body).Decode(&profile); err != nil {
-		return nil, fmt.Errorf("解析微软用户资料失败: %w", err)
+	if profile.UserPrincipalName == "" {
+		profile.UserPrincipalName = strings.TrimSpace(claims.UPN)
 	}
-	return &profile, nil
+	if profile.Mail == "" {
+		profile.Mail = profile.UserPrincipalName
+	}
+	if profile.DisplayName == "" {
+		profile.DisplayName = profile.Mail
+	}
+	if profile.Mail == "" && profile.UserPrincipalName == "" {
+		return nil, fmt.Errorf("微软 id_token 未返回可用邮箱标识")
+	}
+	return profile, nil
 }
 
 // exchangeMicrosoftToken 统一处理授权码和刷新令牌换取 access token。
