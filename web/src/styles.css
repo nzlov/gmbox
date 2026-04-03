@@ -156,7 +156,11 @@ select {
 .mail-item,
 .account-card,
 .account-actions,
-.switch-row {
+.switch-row,
+.detail-meta,
+.detail-actions,
+.filter-bar,
+.move-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -172,6 +176,28 @@ select {
 .mail-item:last-child,
 .account-card:last-child {
   border-bottom: none;
+}
+
+.mail-button,
+.attachment-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mail-button:hover,
+.attachment-item:hover {
+  background: rgba(42, 98, 255, 0.04);
+}
+
+.mail-unread {
+  color: #101828;
+}
+
+.mail-read {
+  color: #667085;
 }
 
 .mail-meta {
@@ -239,6 +265,26 @@ select {
   gap: 12px;
 }
 
+.detail-body {
+  padding: 20px 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+.attachment-list {
+  display: grid;
+  gap: 10px;
+}
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #e7ecf5;
+}
+
 .empty-state {
   padding: 40px 0;
   color: #667085;
@@ -258,6 +304,10 @@ select {
   .mail-item,
   .panel-head,
   .account-card,
+  .filter-bar,
+  .detail-meta,
+  .detail-actions,
+  .move-row,
   .switch-row,
   .topbar {
     align-items: flex-start;

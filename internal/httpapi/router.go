@@ -153,9 +153,12 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 
 	protected.GET("/messages", func(c *gin.Context) {
 		var messages []model.Message
-		query := app.DB.Order("sent_at desc, id desc")
+		query := app.DB.Where("is_deleted = ?", false).Order("sent_at desc, id desc")
 		if accountID := c.Query("account_id"); accountID != "" {
 			query = query.Where("account_id = ?", accountID)
+		}
+		if folder := c.Query("folder"); folder != "" {
+			query = query.Where("folder = ?", folder)
 		}
 		if err := query.Limit(100).Find(&messages).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询邮件失败"})
@@ -164,23 +167,28 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		c.JSON(http.StatusOK, messages)
 	})
 
+	protected.GET("/mailboxes", func(c *gin.Context) {
+		accountID, _ := strconv.Atoi(c.DefaultQuery("account_id", "0"))
+		mailboxes, err := app.Mailer.ListMailboxes(uint(accountID))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询文件夹失败"})
+			return
+		}
+		c.JSON(http.StatusOK, mailboxes)
+	})
+
 	protected.GET("/messages/:id", func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"message": "邮件 ID 不合法"})
 			return
 		}
-		var message model.Message
-		if err := app.DB.First(&message, id).Error; err != nil {
+		message, body, attachments, err := app.Mailer.GetMessageDetail(uint(id))
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"message": "邮件不存在"})
 			return
 		}
-		var body model.MessageBody
-		if err := app.DB.Where("message_id = ?", message.Model.ID).First(&body).Error; err != nil && err != gorm.ErrRecordNotFound {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询邮件正文失败"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": message, "body": body})
+		c.JSON(http.StatusOK, gin.H{"message": message, "body": body, "attachments": attachments})
 	})
 
 	protected.POST("/messages/send", func(c *gin.Context) {
@@ -194,6 +202,84 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "发送成功"})
+	})
+
+	protected.POST("/messages/:id/read", func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "邮件 ID 不合法"})
+			return
+		}
+		if err := app.Mailer.SetMessageRead(c.Request.Context(), uint(id), true); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "已标记为已读"})
+	})
+
+	protected.POST("/messages/:id/unread", func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "邮件 ID 不合法"})
+			return
+		}
+		if err := app.Mailer.SetMessageRead(c.Request.Context(), uint(id), false); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "已标记为未读"})
+	})
+
+	protected.POST("/messages/:id/delete", func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "邮件 ID 不合法"})
+			return
+		}
+		if err := app.Mailer.DeleteMessage(c.Request.Context(), uint(id)); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+	})
+
+	protected.POST("/messages/:id/move", func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "邮件 ID 不合法"})
+			return
+		}
+		var req struct {
+			Folder string `json:"folder" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "目标文件夹不能为空"})
+			return
+		}
+		if err := app.Mailer.MoveMessage(c.Request.Context(), uint(id), req.Folder); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "移动成功"})
+	})
+
+	protected.GET("/attachments/:id/download", func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "附件 ID 不合法"})
+			return
+		}
+		attachment, content, err := app.Mailer.DownloadAttachment(uint(id))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"message": "附件不存在"})
+			return
+		}
+		contentType := attachment.ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", attachment.FileName))
+		c.Data(http.StatusOK, contentType, content)
 	})
 
 	protected.GET("/sync-states", func(c *gin.Context) {

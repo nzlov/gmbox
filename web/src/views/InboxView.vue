@@ -19,7 +19,7 @@
           <p class="eyebrow">聚合视图</p>
           <h1>收件箱</h1>
         </div>
-        <button class="primary-btn" @click="loadData">刷新</button>
+        <button class="primary-btn" @click="refreshAll">刷新</button>
       </header>
 
       <section class="status-grid">
@@ -33,23 +33,46 @@
         </article>
       </section>
 
+      <section class="panel filter-bar">
+        <select v-model="selectedAccount" @change="refreshAll">
+          <option value="">全部邮箱</option>
+          <option v-for="account in accounts" :key="account.id" :value="String(account.id)">
+            {{ account.name }} / {{ account.email }}
+          </option>
+        </select>
+        <select v-model="selectedFolder" @change="loadMessages">
+          <option value="">全部文件夹</option>
+          <option v-for="mailbox in mailboxes" :key="mailbox.id" :value="mailbox.path">
+            {{ mailbox.name }}
+          </option>
+        </select>
+      </section>
+
       <section class="panel">
         <div class="panel-head">
           <h3>聚合邮件列表</h3>
-          <span class="muted">当前版本已打通聚合查询接口，后续可在同步器中接入实际抓取逻辑。</span>
+          <span class="muted">支持多文件夹同步、详情查看与附件下载。</span>
         </div>
         <div v-if="error" class="error-text">{{ error }}</div>
         <div v-if="messages.length === 0" class="empty-state">暂无本地邮件，可先新增邮箱并触发同步。</div>
-        <div v-for="item in messages" :key="item.id" class="mail-item">
+        <button
+          v-for="item in messages"
+          :key="item.id"
+          type="button"
+          class="mail-item mail-button"
+          @click="openDetail(item.id)"
+        >
           <div>
-            <strong>{{ item.subject || '(无主题)' }}</strong>
+            <strong :class="item.is_read ? 'mail-read' : 'mail-unread'">{{ item.subject || '(无主题)' }}</strong>
             <p>{{ item.from_name || item.from_address }}</p>
+            <small>{{ item.folder }}</small>
           </div>
           <div class="mail-meta">
             <span>{{ item.snippet || '暂无摘要' }}</span>
+            <small v-if="item.has_attachment">含附件</small>
             <time>{{ formatDate(item.sent_at) }}</time>
           </div>
-        </div>
+        </button>
       </section>
     </main>
   </div>
@@ -58,26 +81,56 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { request, type MailAccount, type MessageItem } from '@/api'
+import { request, type MailAccount, type MailboxItem, type MessageItem } from '@/api'
 
 const router = useRouter()
 const accounts = ref<MailAccount[]>([])
+const mailboxes = ref<MailboxItem[]>([])
 const messages = ref<MessageItem[]>([])
 const error = ref('')
+const selectedAccount = ref('')
+const selectedFolder = ref('')
 
-// loadData 并行刷新邮箱和聚合邮件列表，保持首页信息同步。
-async function loadData() {
+// refreshAll 统一刷新邮箱、文件夹和邮件列表，避免筛选项与数据源脱节。
+async function refreshAll() {
+  await Promise.all([loadAccounts(), loadMailboxes(), loadMessages()])
+}
+
+// loadAccounts 加载邮箱列表，供筛选器和首页统计共用。
+async function loadAccounts() {
+  accounts.value = await request<MailAccount[]>('/api/accounts')
+}
+
+// loadMailboxes 根据当前邮箱筛选刷新文件夹列表。
+async function loadMailboxes() {
+  const query = selectedAccount.value ? `?account_id=${selectedAccount.value}` : ''
+  mailboxes.value = await request<MailboxItem[]>(`/api/mailboxes${query}`)
+  if (selectedFolder.value && !mailboxes.value.some((item) => item.path === selectedFolder.value)) {
+    selectedFolder.value = ''
+  }
+}
+
+// loadMessages 根据邮箱和文件夹筛选加载邮件列表。
+async function loadMessages() {
   error.value = ''
   try {
-    const [accountList, messageList] = await Promise.all([
-      request<MailAccount[]>('/api/accounts'),
-      request<MessageItem[]>('/api/messages'),
-    ])
-    accounts.value = accountList
-    messages.value = messageList
+    const params = new URLSearchParams()
+    if (selectedAccount.value) {
+      params.set('account_id', selectedAccount.value)
+    }
+    if (selectedFolder.value) {
+      params.set('folder', selectedFolder.value)
+    }
+    const query = params.toString() ? `?${params.toString()}` : ''
+    messages.value = await request<MessageItem[]>(`/api/messages${query}`)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败'
   }
+}
+
+// openDetail 进入详情页，以便继续查看正文和执行操作。
+async function openDetail(messageID: number) {
+  await router.push(`/messages/${messageID}`)
 }
 
 // logout 通过后端清理 Cookie，避免前端误判登录状态。
@@ -94,5 +147,5 @@ function formatDate(value: string) {
   return new Date(value).toLocaleString('zh-CN')
 }
 
-onMounted(loadData)
+onMounted(refreshAll)
 </script>

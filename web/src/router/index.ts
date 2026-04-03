@@ -3,6 +3,7 @@ import LoginView from '@/views/LoginView.vue'
 import InboxView from '@/views/InboxView.vue'
 import AccountsView from '@/views/AccountsView.vue'
 import ComposeView from '@/views/ComposeView.vue'
+import MessageDetailView from '@/views/MessageDetailView.vue'
 
 // router 统一维护页面切换和登录前置校验。
 const router = createRouter({
@@ -13,6 +14,7 @@ const router = createRouter({
     { path: '/inbox', component: InboxView, meta: { auth: true } },
     { path: '/accounts', component: AccountsView, meta: { auth: true } },
     { path: '/compose', component: ComposeView, meta: { auth: true } },
+    { path: '/messages/:id', component: MessageDetailView, meta: { auth: true } },
   ],
 })
 

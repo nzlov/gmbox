@@ -17,10 +17,15 @@ export interface MailAccount {
 export interface MessageItem {
   id: number
   account_id: number
+  mailbox_id: number
+  folder: string
   subject: string
   from_name: string
   from_address: string
   snippet: string
+  is_read: boolean
+  is_deleted: boolean
+  has_attachment: boolean
   sent_at: string
 }
 
@@ -29,6 +34,30 @@ export interface MessageBody {
   message_id: number
   text_body: string
   html_body: string
+}
+
+export interface MailboxItem {
+  id: number
+  account_id: number
+  name: string
+  path: string
+  role: string
+}
+
+export interface AttachmentItem {
+  id: number
+  message_id: number
+  file_name: string
+  part_id: string
+  content_type: string
+  size: number
+  storage_path: string
+}
+
+export interface MessageDetailResponse {
+  message: MessageItem
+  body: MessageBody
+  attachments: AttachmentItem[]
 }
 
 // request 封装统一请求入口，确保所有页面都带上 Cookie。

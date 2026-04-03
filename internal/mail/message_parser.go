@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"mime"
 	"regexp"
 	"strings"
 	"time"
@@ -28,6 +29,14 @@ type parsedMessage struct {
 	HasAttachment bool
 	SentAt        time.Time
 	IsRead        bool
+	Attachments   []parsedAttachment
+}
+
+// parsedAttachment 保存附件元数据和内容，便于后续统一落盘。
+type parsedAttachment struct {
+	FileName    string
+	ContentType string
+	Data        []byte
 }
 
 // parseRawMessage 统一解析 IMAP/POP3 获取到的原始 RFC822 内容。
@@ -79,11 +88,43 @@ func parseRawMessage(raw []byte) (*parsedMessage, error) {
 			}
 		case *gomail.AttachmentHeader:
 			parsed.HasAttachment = true
+			body, readErr := io.ReadAll(part.Body)
+			if readErr != nil {
+				return nil, fmt.Errorf("读取附件失败: %w", readErr)
+			}
+			filename, _ := header.Filename()
+			contentType, _, _ := header.ContentType()
+			if strings.TrimSpace(contentType) == "" {
+				contentType = mime.TypeByExtension(extensionFromName(filename))
+			}
+			parsed.Attachments = append(parsed.Attachments, parsedAttachment{
+				FileName:    fallbackAttachmentName(filename, len(parsed.Attachments)+1),
+				ContentType: contentType,
+				Data:        body,
+			})
 		}
 	}
 
 	parsed.Snippet = buildSnippet(parsed.TextBody, parsed.HTMLBody)
 	return parsed, nil
+}
+
+// fallbackAttachmentName 为缺失文件名的附件生成可用名称，避免落盘失败。
+func fallbackAttachmentName(name string, index int) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed != "" {
+		return trimmed
+	}
+	return fmt.Sprintf("attachment-%d.bin", index)
+}
+
+// extensionFromName 为 MIME 类型推断提供扩展名。
+func extensionFromName(name string) string {
+	parts := strings.Split(name, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	return "." + parts[len(parts)-1]
 }
 
 // enrichFromEnvelope 用 IMAP ENVELOPE 补齐部分服务端未出现在正文头里的元信息。

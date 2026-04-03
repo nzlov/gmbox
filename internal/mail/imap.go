@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sort"
+	"strings"
 
 	"github.com/emersion/go-imap"
 	imapclient "github.com/emersion/go-imap/client"
@@ -13,7 +15,7 @@ import (
 	"gmbox/internal/model"
 )
 
-// SyncIMAP 拉取 INBOX 中的新邮件并写入本地数据库。
+// SyncIMAP 拉取全部可见文件夹中的新邮件并写入本地数据库。
 func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state *model.SyncState, fetchBody bool) error {
 	password, err := s.DecryptPassword(account)
 	if err != nil {
@@ -24,30 +26,55 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 		return err
 	}
 	defer client.Logout()
-
-	mbox, err := client.Select("INBOX", false)
+	cursors := IMAPCursors(state)
+	mailboxes, err := listRemoteMailboxes(client)
 	if err != nil {
-		return fmt.Errorf("选择 INBOX 失败: %w", err)
+		return err
+	}
+	if err := s.syncMailboxes(account, mailboxes); err != nil {
+		return err
+	}
+	totalNew := 0
+	for _, mailbox := range mailboxes {
+		count, maxUID, syncErr := s.syncIMAPMailbox(client, account, mailbox.Path, cursors[mailbox.Path], fetchBody)
+		if syncErr != nil {
+			return syncErr
+		}
+		totalNew += count
+		cursors[mailbox.Path] = maxUID
+	}
+	if err := SaveIMAPCursors(state, cursors); err != nil {
+		return err
+	}
+	state.LastMessage = fmt.Sprintf("IMAP 同步完成，新增 %d 封邮件，覆盖 %d 个文件夹", totalNew, len(mailboxes))
+	return nil
+}
+
+// syncIMAPMailbox 同步单个文件夹，并返回新增数量和最新 UID。
+func (s *Service) syncIMAPMailbox(client *imapclient.Client, account model.MailAccount, folder string, lastUID uint32, fetchBody bool) (int, uint32, error) {
+	mbox, err := client.Select(folder, false)
+	if err != nil {
+		return 0, lastUID, fmt.Errorf("选择文件夹 %s 失败: %w", folder, err)
 	}
 	if mbox.Messages == 0 {
-		return nil
+		return 0, lastUID, nil
 	}
 
 	criteria := &imap.SearchCriteria{}
 	uids, err := client.UidSearch(criteria)
 	if err != nil {
-		return fmt.Errorf("查询 IMAP UID 失败: %w", err)
+		return 0, lastUID, fmt.Errorf("查询文件夹 %s 的 UID 失败: %w", folder, err)
 	}
 	sort.Slice(uids, func(i, j int) bool { return uids[i] < uids[j] })
 
 	newUIDs := make([]uint32, 0, len(uids))
 	for _, uid := range uids {
-		if uid > state.LastIMAPUID {
+		if uid > lastUID {
 			newUIDs = append(newUIDs, uid)
 		}
 	}
 	if len(newUIDs) == 0 {
-		return nil
+		return 0, lastUID, nil
 	}
 
 	seqset := new(imap.SeqSet)
@@ -60,7 +87,8 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 		done <- client.UidFetch(seqset, items, messages)
 	}()
 
-	var maxUID uint32 = state.LastIMAPUID
+	var maxUID uint32 = lastUID
+	total := 0
 	for msg := range messages {
 		if msg == nil {
 			continue
@@ -71,29 +99,28 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 		}
 		raw, readErr := io.ReadAll(body)
 		if readErr != nil {
-			return fmt.Errorf("读取 IMAP 正文失败: %w", readErr)
+			return 0, lastUID, fmt.Errorf("读取 IMAP 正文失败: %w", readErr)
 		}
 		parsed, parseErr := parseRawMessage(raw)
 		if parseErr != nil {
-			return parseErr
+			return 0, lastUID, parseErr
 		}
 		parsed.enrichFromEnvelope(msg.Envelope, msg.Flags)
 		if parsed.SentAt.IsZero() {
 			parsed.SentAt = msg.InternalDate
 		}
-		if err := s.upsertMessage(account, "INBOX", msg.Uid, "", parsed, fetchBody); err != nil {
-			return err
+		if err := s.upsertMessage(account, folder, msg.Uid, "", parsed, fetchBody); err != nil {
+			return 0, lastUID, err
 		}
+		total++
 		if msg.Uid > maxUID {
 			maxUID = msg.Uid
 		}
 	}
 	if err := <-done; err != nil {
-		return fmt.Errorf("抓取 IMAP 邮件失败: %w", err)
+		return 0, lastUID, fmt.Errorf("抓取文件夹 %s 的邮件失败: %w", folder, err)
 	}
-	state.LastIMAPUID = maxUID
-	state.LastMessage = fmt.Sprintf("IMAP 同步完成，新增 %d 封邮件", len(newUIDs))
-	return nil
+	return total, maxUID, nil
 }
 
 // dialIMAP 按账户配置建立 IMAP 连接并完成认证。
@@ -118,18 +145,23 @@ func dialIMAP(account model.MailAccount, password string) (*imapclient.Client, e
 
 // upsertMessage 根据账户和协议唯一标识保存邮件，避免重复落库。
 func (s *Service) upsertMessage(account model.MailAccount, folder string, uid uint32, pop3UIDL string, parsed *parsedMessage, fetchBody bool) error {
+	mailboxID, err := s.ensureMailbox(account.Model.ID, folder)
+	if err != nil {
+		return err
+	}
 	var message model.Message
 	query := s.db.Where("account_id = ?", account.Model.ID)
 	if uid > 0 {
-		query = query.Where("uid = ?", uid)
+		query = query.Where("folder = ? AND uid = ?", folder, uid)
 	} else {
-		query = query.Where("pop3_uid_l = ?", pop3UIDL)
+		query = query.Where("folder = ? AND pop3_uid_l = ?", folder, pop3UIDL)
 	}
-	err := query.First(&message).Error
+	err = query.First(&message).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return err
 	}
 	parsed.applyToMessage(&message, account.Model.ID, folder)
+	message.MailboxID = mailboxID
 	message.UID = uid
 	message.POP3UIDL = pop3UIDL
 	if err == gorm.ErrRecordNotFound {
@@ -156,9 +188,176 @@ func (s *Service) upsertMessage(account model.MailAccount, folder string, uid ui
 		body.HTMLBody = ""
 	}
 	if bodyErr == gorm.ErrRecordNotFound {
-		return s.db.Create(&body).Error
+		if err := s.db.Create(&body).Error; err != nil {
+			return err
+		}
+	} else {
+		if err := s.db.Save(&body).Error; err != nil {
+			return err
+		}
 	}
-	return s.db.Save(&body).Error
+	return s.replaceAttachments(message.Model.ID, parsed.Attachments)
+}
+
+// syncMailboxes 将远端文件夹同步到本地表，便于前端直接展示目录树。
+func (s *Service) syncMailboxes(account model.MailAccount, mailboxes []model.Mailbox) error {
+	for _, mailbox := range mailboxes {
+		mailbox.AccountID = account.Model.ID
+		if _, err := s.ensureMailbox(account.Model.ID, mailbox.Path); err != nil {
+			return err
+		}
+		_ = s.db.Model(&model.Mailbox{}).Where("account_id = ? AND path = ?", account.Model.ID, mailbox.Path).Updates(map[string]any{
+			"name": mailbox.Name,
+			"role": mailbox.Role,
+		}).Error
+	}
+	return nil
+}
+
+// ensureMailbox 根据账户和路径查找或创建文件夹记录。
+func (s *Service) ensureMailbox(accountID uint, path string) (uint, error) {
+	var mailbox model.Mailbox
+	err := s.db.Where("account_id = ? AND path = ?", accountID, path).First(&mailbox).Error
+	if err == nil {
+		return mailbox.Model.ID, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return 0, err
+	}
+	mailbox = model.Mailbox{AccountID: accountID, Name: displayMailboxName(path), Path: path, Role: mailboxRole(path)}
+	if err := s.db.Create(&mailbox).Error; err != nil {
+		return 0, err
+	}
+	return mailbox.Model.ID, nil
+}
+
+// listRemoteMailboxes 列出 IMAP 可见文件夹，并过滤噪声目录。
+func listRemoteMailboxes(client *imapclient.Client) ([]model.Mailbox, error) {
+	ch := make(chan *imap.MailboxInfo, 32)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.List("", "*", ch)
+	}()
+	result := make([]model.Mailbox, 0)
+	for mailbox := range ch {
+		if mailbox == nil || strings.TrimSpace(mailbox.Name) == "" {
+			continue
+		}
+		if hasMailboxAttribute(mailbox.Attributes, `\\Noselect`) {
+			continue
+		}
+		result = append(result, model.Mailbox{Name: displayMailboxName(mailbox.Name), Path: mailbox.Name, Role: mailboxRole(mailbox.Name)})
+	}
+	if err := <-done; err != nil {
+		return nil, fmt.Errorf("列出 IMAP 文件夹失败: %w", err)
+	}
+	if len(result) == 0 {
+		result = append(result, model.Mailbox{Name: "INBOX", Path: "INBOX", Role: "inbox"})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
+	return result, nil
+}
+
+// replaceAttachments 重新写入当前邮件的附件文件与元数据，避免重复同步后残留旧文件。
+func (s *Service) replaceAttachments(messageID uint, attachments []parsedAttachment) error {
+	var old []model.Attachment
+	if err := s.db.Where("message_id = ?", messageID).Find(&old).Error; err != nil {
+		return err
+	}
+	for _, item := range old {
+		if strings.TrimSpace(item.StoragePath) != "" {
+			_ = os.Remove(item.StoragePath)
+		}
+	}
+	if err := s.db.Where("message_id = ?", messageID).Delete(&model.Attachment{}).Error; err != nil {
+		return err
+	}
+	if len(attachments) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(attachmentBaseDir(), 0o755); err != nil {
+		return err
+	}
+	for idx, attachment := range attachments {
+		fileName := sanitizeFileName(attachment.FileName)
+		storagePath := fmt.Sprintf("%d-%d-%s", messageID, idx+1, fileName)
+		fullPath := joinAttachmentPath(storagePath)
+		if err := os.WriteFile(fullPath, attachment.Data, 0o644); err != nil {
+			return err
+		}
+		record := model.Attachment{
+			MessageID:   messageID,
+			FileName:    fileName,
+			PartID:      fmt.Sprintf("part-%d", idx+1),
+			ContentType: attachment.ContentType,
+			Size:        int64(len(attachment.Data)),
+			StoragePath: fullPath,
+		}
+		if err := s.db.Create(&record).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// newUIDSet 为单封邮件操作构造 UID 序列集合。
+func newUIDSet(uid uint32) *imap.SeqSet {
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(uid)
+	return seqset
+}
+
+// hasMailboxAttribute 判断文件夹是否包含指定属性。
+func hasMailboxAttribute(attrs []string, target string) bool {
+	for _, attr := range attrs {
+		if strings.EqualFold(attr, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// displayMailboxName 生成适合前端展示的文件夹名称。
+func displayMailboxName(path string) string {
+	parts := strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '.' })
+	if len(parts) == 0 {
+		return path
+	}
+	return parts[len(parts)-1]
+}
+
+// mailboxRole 推断常见系统文件夹角色，方便前端做高亮。
+func mailboxRole(path string) string {
+	lower := strings.ToLower(path)
+	switch {
+	case strings.Contains(lower, "inbox"):
+		return "inbox"
+	case strings.Contains(lower, "sent"):
+		return "sent"
+	case strings.Contains(lower, "draft"):
+		return "draft"
+	case strings.Contains(lower, "trash") || strings.Contains(lower, "deleted"):
+		return "trash"
+	case strings.Contains(lower, "archive"):
+		return "archive"
+	default:
+		return "custom"
+	}
+}
+
+// sanitizeFileName 去掉路径分隔符，避免附件文件写出目标目录。
+func sanitizeFileName(name string) string {
+	replacer := strings.NewReplacer("/", "_", "\\", "_", "..", "_")
+	clean := replacer.Replace(strings.TrimSpace(name))
+	if clean == "" {
+		return "attachment.bin"
+	}
+	return clean
+}
+
+// joinAttachmentPath 收敛附件本地存储路径。
+func joinAttachmentPath(name string) string {
+	return fmt.Sprintf("%s/%s", attachmentBaseDir(), name)
 }
 
 // minInt 用于限制通道缓冲大小，避免小批量抓取时申请过大缓冲区。

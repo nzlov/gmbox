@@ -37,6 +37,7 @@ type Mailbox struct {
 	AccountID uint   `gorm:"index;not null" json:"account_id"`
 	Name      string `gorm:"size:128;not null" json:"name"`
 	Path      string `gorm:"size:255;not null" json:"path"`
+	Role      string `gorm:"size:64" json:"role"`
 }
 
 // Message 保存标准化后的邮件摘要。
@@ -54,6 +55,7 @@ type Message struct {
 	ToAddresses   string    `gorm:"type:text" json:"to_addresses"`
 	Snippet       string    `gorm:"type:text" json:"snippet"`
 	IsRead        bool      `json:"is_read"`
+	IsDeleted     bool      `json:"is_deleted"`
 	HasAttachment bool      `json:"has_attachment"`
 	SentAt        time.Time `gorm:"index" json:"sent_at"`
 }
@@ -71,6 +73,7 @@ type Attachment struct {
 	utilsdb.Model
 	MessageID   uint   `gorm:"index;not null" json:"message_id"`
 	FileName    string `gorm:"size:255;not null" json:"file_name"`
+	PartID      string `gorm:"size:128" json:"part_id"`
 	ContentType string `gorm:"size:255" json:"content_type"`
 	Size        int64  `json:"size"`
 	StoragePath string `gorm:"size:500" json:"storage_path"`
@@ -81,6 +84,7 @@ type SyncState struct {
 	utilsdb.Model
 	AccountID     uint       `gorm:"uniqueIndex;not null" json:"account_id"`
 	LastIMAPUID   uint32     `json:"last_imap_uid"`
+	IMAPCursorMap string     `gorm:"type:text" json:"imap_cursor_map"`
 	LastPOP3UIDL  string     `gorm:"size:255" json:"last_pop3_uidl"`
 	LastSyncAt    *time.Time `json:"last_sync_at"`
 	LastError     string     `gorm:"type:text" json:"last_error"`
