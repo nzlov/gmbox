@@ -17,49 +17,49 @@ import (
 )
 
 // SyncPOP3 拉取收件箱全部 UIDL 并对未入库的新邮件执行增量下载。
-func (s *Service) SyncPOP3(ctx context.Context, account model.MailAccount, state *model.SyncState, fetchBody bool) error {
+func (s *Service) SyncPOP3(ctx context.Context, account model.MailAccount, state *model.SyncState, fetchBody bool) (*SyncResult, error) {
 	password, err := s.DecryptPassword(account)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	client, err := dialPOP3(ctx, account)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer client.close()
 
 	if err := client.auth(account.Username, password); err != nil {
-		return err
+		return nil, err
 	}
 	entries, err := client.uidlAll()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	newCount := 0
 	for _, entry := range entries {
 		var count int64
 		if err := s.db.Model(&model.Message{}).Where("account_id = ? AND pop3_uid_l = ?", account.Model.ID, entry.uidl).Count(&count).Error; err != nil {
-			return err
+			return nil, err
 		}
 		if count > 0 {
 			continue
 		}
 		raw, err := client.retr(entry.number)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		parsed, err := parseRawMessage(raw)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := s.upsertMessage(account, "INBOX", 0, entry.uidl, parsed, fetchBody); err != nil {
-			return err
+			return nil, err
 		}
 		state.LastPOP3UIDL = entry.uidl
 		newCount++
 	}
 	state.LastMessage = fmt.Sprintf("POP3 同步完成，新增 %d 封邮件", newCount)
-	return nil
+	return &SyncResult{NewMessages: newCount, MailboxCount: 1}, nil
 }
 
 type pop3Entry struct {

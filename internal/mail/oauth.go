@@ -190,13 +190,18 @@ func (s *Service) UpsertMicrosoftOAuthAccountWithPKCE(ctx context.Context, code 
 
 // OAuthAccessToken 返回当前账户可用的 OAuth access token，并在必要时自动刷新。
 func (s *Service) OAuthAccessToken(ctx context.Context, account *model.MailAccount) (string, error) {
+	return s.refreshOAuthAccessToken(ctx, account, false)
+}
+
+// refreshOAuthAccessToken 统一处理 access token 读取与刷新，并允许同步失败后强制刷新一次。
+func (s *Service) refreshOAuthAccessToken(ctx context.Context, account *model.MailAccount, force bool) (string, error) {
 	if normalizeAuthType(account.AuthType) != "oauth" {
 		return "", fmt.Errorf("当前邮箱未启用 OAuth")
 	}
 	if strings.TrimSpace(account.OAuthAccessToken) == "" {
 		return "", fmt.Errorf("当前邮箱缺少 OAuth access token")
 	}
-	if account.OAuthTokenExpiry != nil && account.OAuthTokenExpiry.After(time.Now().Add(oauthExpirySkew)) {
+	if !force && account.OAuthTokenExpiry != nil && account.OAuthTokenExpiry.After(time.Now().Add(oauthExpirySkew)) {
 		return s.crypto.Decrypt(account.OAuthAccessToken)
 	}
 	refreshToken, err := s.crypto.Decrypt(account.OAuthRefreshToken)
@@ -219,6 +224,11 @@ func (s *Service) OAuthAccessToken(ctx context.Context, account *model.MailAccou
 		return "", err
 	}
 	return token.AccessToken, nil
+}
+
+// ForceRefreshOAuthAccessToken 在协议登录失败后主动刷新一次 access token，给同步器提供重试入口。
+func (s *Service) ForceRefreshOAuthAccessToken(ctx context.Context, account *model.MailAccount) (string, error) {
+	return s.refreshOAuthAccessToken(ctx, account, true)
 }
 
 // storeOAuthToken 统一加密保存 access/refresh token，避免散落多处重复逻辑。

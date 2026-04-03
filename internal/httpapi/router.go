@@ -449,6 +449,28 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		}
 		c.JSON(http.StatusOK, states)
 	})
+
+	protected.GET("/sync-logs", func(c *gin.Context) {
+		var logs []model.SyncLog
+		query := app.DB.Order("started_at desc, id desc")
+		if accountID := strings.TrimSpace(c.Query("account_id")); accountID != "" {
+			query = query.Where("account_id = ?", accountID)
+		}
+		limit := 100
+		if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
+			if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
+				if parsed > 500 {
+					parsed = 500
+				}
+				limit = parsed
+			}
+		}
+		if err := query.Limit(limit).Find(&logs).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询同步日志失败"})
+			return
+		}
+		c.JSON(http.StatusOK, logs)
+	})
 }
 
 // registerFrontend 让非 API 请求统一交给前端路由处理。

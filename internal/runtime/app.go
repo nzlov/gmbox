@@ -95,6 +95,7 @@ func migrate(db *gorm.DB) error {
 		&model.MessageBody{},
 		&model.Attachment{},
 		&model.SyncState{},
+		&model.SyncLog{},
 	); err != nil {
 		return fmt.Errorf("自动迁移失败: %w", err)
 	}

@@ -10,11 +10,23 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
+	message "github.com/emersion/go-message"
+	_ "github.com/emersion/go-message/charset"
 	gomail "github.com/emersion/go-message/mail"
 	"gmbox/internal/model"
 )
 
 var htmlTagPattern = regexp.MustCompile(`<[^>]+>`)
+
+func init() {
+	baseReader := message.CharsetReader
+	message.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+		return normalizeMessageCharsetReader(baseReader, charset, input)
+	}
+	imap.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+		return normalizeMessageCharsetReader(baseReader, charset, input)
+	}
+}
 
 // parsedMessage 保存协议层解析后的统一邮件结构，便于复用入库逻辑。
 type parsedMessage struct {
@@ -107,6 +119,30 @@ func parseRawMessage(raw []byte) (*parsedMessage, error) {
 
 	parsed.Snippet = buildSnippet(parsed.TextBody, parsed.HTMLBody)
 	return parsed, nil
+}
+
+// normalizeMessageCharsetReader 清洗异常 charset 写法，避免带引号的 gb2312 一类头部直接导致整封邮件解析失败。
+func normalizeMessageCharsetReader(baseReader func(string, io.Reader) (io.Reader, error), charset string, input io.Reader) (io.Reader, error) {
+	normalized := strings.TrimSpace(charset)
+	normalized = strings.Trim(normalized, `"'`)
+	if strings.EqualFold(normalized, "gb2312") {
+		// 很多中文邮件实际按 GBK/GB18030 发送，但头部仍写成 gb2312，这里统一放宽兼容。
+		normalized = "gb18030"
+	}
+	if normalized == "" {
+		normalized = strings.TrimSpace(charset)
+	}
+	if baseReader == nil {
+		return nil, fmt.Errorf("unknown charset: %s", normalized)
+	}
+	reader, err := baseReader(normalized, input)
+	if err == nil {
+		return reader, nil
+	}
+	if normalized == charset {
+		return nil, err
+	}
+	return baseReader(strings.TrimSpace(charset), input)
 }
 
 // fallbackAttachmentName 为缺失文件名的附件生成可用名称，避免落盘失败。

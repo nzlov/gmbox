@@ -2,11 +2,14 @@ package mail
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/emersion/go-imap"
 	imapclient "github.com/emersion/go-imap/client"
@@ -16,38 +19,38 @@ import (
 )
 
 // SyncIMAP 拉取全部可见文件夹中的新邮件并写入本地数据库。
-func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state *model.SyncState, fetchBody bool) error {
+func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state *model.SyncState, fetchBody bool) (*SyncResult, error) {
 	password, err := s.ResolveAuthSecret(ctx, &account)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	client, err := dialIMAP(account, password)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer client.Logout()
 	cursors := IMAPCursors(state)
 	mailboxes, err := listRemoteMailboxes(client)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := s.syncMailboxes(account, mailboxes); err != nil {
-		return err
+		return nil, err
 	}
 	totalNew := 0
 	for _, mailbox := range mailboxes {
 		count, maxUID, syncErr := s.syncIMAPMailbox(client, account, mailbox.Path, cursors[mailbox.Path], fetchBody)
 		if syncErr != nil {
-			return syncErr
+			return nil, syncErr
 		}
 		totalNew += count
 		cursors[mailbox.Path] = maxUID
 	}
 	if err := SaveIMAPCursors(state, cursors); err != nil {
-		return err
+		return nil, err
 	}
 	state.LastMessage = fmt.Sprintf("IMAP 同步完成，新增 %d 封邮件，覆盖 %d 个文件夹", totalNew, len(mailboxes))
-	return nil
+	return &SyncResult{NewMessages: totalNew, MailboxCount: len(mailboxes)}, nil
 }
 
 // syncIMAPMailbox 同步单个文件夹，并返回新增数量和最新 UID。
@@ -125,29 +128,119 @@ func (s *Service) syncIMAPMailbox(client *imapclient.Client, account model.MailA
 
 // dialIMAP 按账户配置建立 IMAP 连接并完成认证。
 func dialIMAP(account model.MailAccount, password string) (*imapclient.Client, error) {
+	username := strings.TrimSpace(account.Username)
+	if username == "" {
+		username = strings.TrimSpace(account.Email)
+	}
+	if normalizeAuthType(account.AuthType) == "oauth" {
+		client, err := dialIMAPOAuth(account, username, password)
+		if err != nil {
+			return nil, err
+		}
+		return client, nil
+	}
+	client, err := openIMAPClient(account)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Login(username, password); err != nil {
+		_ = client.Logout()
+		return nil, fmt.Errorf("IMAP 登录失败: %w", err)
+	}
+	return client, nil
+}
+
+// openIMAPClient 统一创建 IMAP 连接，避免认证重试时复制拨号逻辑。
+func openIMAPClient(account model.MailAccount) (*imapclient.Client, error) {
 	addr := fmt.Sprintf("%s:%d", account.IMAPHost, account.IMAPPort)
 	var client *imapclient.Client
 	var err error
 	if account.UseTLS {
-		client, err = imapclient.DialTLS(addr, nil)
+		dialer := &net.Dialer{Timeout: 15 * time.Second}
+		client, err = imapclient.DialWithDialerTLS(dialer, addr, &tls.Config{ServerName: account.IMAPHost, MinVersion: tls.VersionTLS12})
 	} else {
 		client, err = imapclient.Dial(addr)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("连接 IMAP 失败: %w", err)
 	}
-	if normalizeAuthType(account.AuthType) == "oauth" {
-		if err := client.Authenticate(newXOAUTH2Client(account.Username, password)); err != nil {
+	return client, nil
+}
+
+type imapOAuthAttempt struct {
+	name string
+	auth func(*imapclient.Client) error
+}
+
+// dialIMAPOAuth 根据服务端能力按优先级尝试 OAuth 机制，并在失败时自动重连回退。
+func dialIMAPOAuth(account model.MailAccount, username string, token string) (*imapclient.Client, error) {
+	probeClient, err := openIMAPClient(account)
+	if err != nil {
+		return nil, err
+	}
+	attempts := buildIMAPOAuthAttempts(probeClient, account, username, token)
+	_ = probeClient.Logout()
+
+	var failureMessages []string
+	for _, attempt := range attempts {
+		client, err := openIMAPClient(account)
+		if err != nil {
+			failureMessages = append(failureMessages, fmt.Sprintf("%s 连接失败: %v", attempt.name, err))
+			continue
+		}
+		if err := attempt.auth(client); err != nil {
+			failureMessages = append(failureMessages, fmt.Sprintf("%s 失败: %v", attempt.name, err))
 			_ = client.Logout()
-			return nil, fmt.Errorf("IMAP OAuth 登录失败: %w", err)
+			continue
 		}
 		return client, nil
 	}
-	if err := client.Login(account.Username, password); err != nil {
-		_ = client.Logout()
-		return nil, fmt.Errorf("IMAP 登录失败: %w", err)
+	if len(failureMessages) == 0 {
+		return nil, fmt.Errorf("IMAP OAuth 登录失败: 服务端未声明可用认证机制")
 	}
-	return client, nil
+	return nil, fmt.Errorf("IMAP OAuth 登录失败: %s", strings.Join(failureMessages, "；"))
+}
+
+// buildIMAPOAuthAttempts 先尊重服务端能力声明，再补一个兜底顺序避免少量服务端声明不完整。
+func buildIMAPOAuthAttempts(client *imapclient.Client, account model.MailAccount, username string, token string) []imapOAuthAttempt {
+	orderedNames := make([]string, 0, 2)
+	appendMechanism := func(name string) {
+		for _, existing := range orderedNames {
+			if existing == name {
+				return
+			}
+		}
+		orderedNames = append(orderedNames, name)
+	}
+	if supported, err := client.SupportAuth(imapOAuthMechOAuthBearer); err == nil && supported {
+		appendMechanism(imapOAuthMechOAuthBearer)
+	}
+	if supported, err := client.SupportAuth(imapOAuthMechXOAUTH2); err == nil && supported {
+		appendMechanism(imapOAuthMechXOAUTH2)
+	}
+	appendMechanism(imapOAuthMechOAuthBearer)
+	appendMechanism(imapOAuthMechXOAUTH2)
+
+	attempts := make([]imapOAuthAttempt, 0, len(orderedNames))
+	for _, name := range orderedNames {
+		switch name {
+		case imapOAuthMechOAuthBearer:
+			attempts = append(attempts, imapOAuthAttempt{
+				name: imapOAuthMechOAuthBearer,
+				auth: func(client *imapclient.Client) error {
+					return client.Authenticate(newOAuthBearerClient(username, token, account.IMAPHost, account.IMAPPort))
+				},
+			})
+		case imapOAuthMechXOAUTH2:
+			attempts = append(attempts, imapOAuthAttempt{
+				name: imapOAuthMechXOAUTH2,
+				auth: func(client *imapclient.Client) error {
+					return client.Authenticate(newXOAUTH2Client(username, token))
+				},
+			})
+		}
+	}
+	return attempts
 }
 
 // upsertMessage 根据账户和协议唯一标识保存邮件，避免重复落库。

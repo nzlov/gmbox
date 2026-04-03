@@ -8,6 +8,11 @@ import (
 	"github.com/emersion/go-sasl"
 )
 
+const (
+	imapOAuthMechOAuthBearer = "OAUTHBEARER"
+	imapOAuthMechXOAUTH2     = "XOAUTH2"
+)
+
 // xoauth2Client 兼容微软邮箱常用的 XOAUTH2 机制，供 IMAP AUTHENTICATE 复用。
 type xoauth2Client struct {
 	username string
@@ -28,6 +33,16 @@ func (x *xoauth2Client) Next(_ []byte) ([]byte, error) {
 // newXOAUTH2Client 构造 IMAP 所需的 SASL 客户端。
 func newXOAUTH2Client(username string, token string) sasl.Client {
 	return &xoauth2Client{username: username, token: token}
+}
+
+// newOAuthBearerClient 构造标准 OAUTHBEARER 客户端，优先兼容声明 RFC 7628 的服务端。
+func newOAuthBearerClient(username string, token string, host string, port int) sasl.Client {
+	return sasl.NewOAuthBearerClient(&sasl.OAuthBearerOptions{
+		Username: username,
+		Token:    token,
+		Host:     host,
+		Port:     port,
+	})
 }
 
 // smtpXOAUTH2Auth 适配 net/smtp.Auth 接口，供 SMTP 发信走 OAuth。
