@@ -6,10 +6,11 @@
         <h2>gmbox</h2>
       </div>
       <nav class="nav-links">
-        <RouterLink to="/inbox">聚合收件箱</RouterLink>
-        <RouterLink to="/accounts">邮箱管理</RouterLink>
+        <RouterLink to="/inbox">聚合信息</RouterLink>
         <RouterLink to="/compose">写信</RouterLink>
+        <RouterLink to="/accounts">邮箱管理</RouterLink>
       </nav>
+      <button class="ghost-btn sidebar-logout" @click="logout">退出登录</button>
     </aside>
 
     <main class="content-shell">
@@ -48,8 +49,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { request, type MailAccount } from '@/api'
 
+const router = useRouter()
 const accounts = ref<MailAccount[]>([])
 const message = ref('')
 const isError = ref(false)
@@ -114,6 +117,12 @@ async function submit() {
     isError.value = true
     message.value = err instanceof Error ? err.message : '发送失败'
   }
+}
+
+// logout 通过后端清理登录态，确保跳回登录页后状态一致。
+async function logout() {
+  await request('/api/auth/logout', { method: 'POST' })
+  await router.push('/login')
 }
 
 onMounted(loadAccounts)

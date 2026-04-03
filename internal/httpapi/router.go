@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -153,18 +154,51 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 
 	protected.GET("/messages", func(c *gin.Context) {
 		var messages []model.Message
-		query := app.DB.Where("is_deleted = ?", false).Order("sent_at desc, id desc")
+		query := app.DB.Model(&model.Message{}).Where("is_deleted = ?", false)
 		if accountID := c.Query("account_id"); accountID != "" {
 			query = query.Where("account_id = ?", accountID)
 		}
 		if folder := c.Query("folder"); folder != "" {
 			query = query.Where("folder = ?", folder)
 		}
-		if err := query.Limit(100).Find(&messages).Error; err != nil {
+		if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+			like := "%" + keyword + "%"
+			query = query.Where(
+				"subject LIKE ? OR from_name LIKE ? OR from_address LIKE ? OR snippet LIKE ?",
+				like,
+				like,
+				like,
+				like,
+			)
+		}
+
+		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		if page < 1 {
+			page = 1
+		}
+		pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", strconv.Itoa(app.Config.Mail.PageSize)))
+		if pageSize < 1 {
+			pageSize = app.Config.Mail.PageSize
+		}
+		if pageSize > 200 {
+			pageSize = 200
+		}
+
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "统计邮件失败"})
+			return
+		}
+		if err := query.Order("sent_at desc, id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&messages).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询邮件失败"})
 			return
 		}
-		c.JSON(http.StatusOK, messages)
+		c.JSON(http.StatusOK, gin.H{
+			"items":     messages,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
+		})
 	})
 
 	protected.GET("/mailboxes", func(c *gin.Context) {

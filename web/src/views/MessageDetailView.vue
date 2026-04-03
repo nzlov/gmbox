@@ -6,10 +6,11 @@
         <h2>gmbox</h2>
       </div>
       <nav class="nav-links">
-        <RouterLink to="/inbox">聚合收件箱</RouterLink>
-        <RouterLink to="/accounts">邮箱管理</RouterLink>
+        <RouterLink to="/inbox">聚合信息</RouterLink>
         <RouterLink to="/compose">写信</RouterLink>
+        <RouterLink to="/accounts">邮箱管理</RouterLink>
       </nav>
+      <button class="ghost-btn sidebar-logout" @click="logout">退出登录</button>
     </aside>
 
     <main class="content-shell">
@@ -276,6 +277,12 @@ function formatSize(size: number) {
 // toggleImages 让远程图片只在用户显式确认后才渲染，降低追踪像素风险。
 function toggleImages() {
   showRemoteImages.value = !showRemoteImages.value
+}
+
+// logout 通过后端销毁 Cookie，避免详情页返回后仍保留旧登录态。
+async function logout() {
+  await request('/api/auth/logout', { method: 'POST' })
+  await router.push('/login')
 }
 
 // hardenSanitizedHtml 对已经过白名单清洗的 HTML 再补一层链接安全策略。

@@ -29,6 +29,13 @@ export interface MessageItem {
   sent_at: string
 }
 
+export interface MessageListResponse {
+  items: MessageItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface MessageBody {
   id: number
   message_id: number
