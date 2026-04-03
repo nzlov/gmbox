@@ -11,7 +11,7 @@
       <q-btn color="primary" unelevated no-caps icon="add" label="添加邮箱" @click="openCreateModal" />
     </template>
 
-    <q-card flat class="app-glass-card">
+    <q-card bordered>
       <q-card-section v-if="message || error" class="q-pt-none">
         <q-banner v-if="message" rounded class="bg-green-1 text-positive q-mb-sm">{{ message }}</q-banner>
         <q-banner v-if="error" rounded class="bg-red-1 text-negative">{{ error }}</q-banner>
@@ -32,8 +32,8 @@
         <template #top>
           <div class="full-width row q-col-gutter-md items-center">
             <div class="col-12 col-xl">
-              <div class="section-title">邮箱列表</div>
-              <div class="section-subtitle q-mt-xs">支持服务商自动配置、微软 OAuth 和非 OAuth 批量导入。</div>
+              <div class="text-subtitle1 text-weight-bold">邮箱列表</div>
+              <div class="text-body2 text-grey-7 q-mt-xs">支持服务商自动配置、微软 OAuth 和非 OAuth 批量导入。</div>
             </div>
             <div class="col-12 col-xl-4">
               <q-input v-model.trim="tableFilter" outlined dense clearable label="搜索名称、邮箱或服务商" />
@@ -77,7 +77,7 @@
     </q-card>
 
     <q-dialog v-model="showModal" @hide="closeModal">
-      <q-card class="account-dialog-card">
+        <q-card class="full-width" style="max-width: 920px">
         <q-card-section class="row items-start justify-between q-col-gutter-md">
           <div class="col">
             <div class="text-h6 text-weight-bold">{{ editingID ? '修改邮箱' : '添加邮箱' }}</div>
@@ -211,7 +211,7 @@
     </q-dialog>
 
     <q-dialog v-model="showImportModal" @hide="closeImportModal">
-      <q-card class="account-dialog-card">
+        <q-card class="full-width" style="max-width: 920px">
         <q-card-section class="row items-start justify-between q-col-gutter-md">
           <div class="col">
             <div class="text-h6 text-weight-bold">批量导入非 OAuth 邮箱</div>
@@ -849,27 +849,3 @@ onBeforeUnmount(() => {
   oauthPopup = null
 })
 </script>
-
-<style scoped>
-.account-dialog-card {
-  width: min(920px, calc(100vw - 24px));
-  max-width: 100%;
-  border-radius: 24px;
-}
-
-:deep(.q-table__top) {
-  padding: 20px;
-}
-
-:deep(.q-table thead th) {
-  color: #475569;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-@media (max-width: 860px) {
-  .account-dialog-card {
-    width: calc(100vw - 16px);
-  }
-}
-</style>

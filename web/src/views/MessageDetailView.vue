@@ -10,14 +10,14 @@
       <q-btn outline color="primary" no-caps icon="arrow_back" label="返回列表" @click="router.push('/inbox')" />
     </template>
 
-    <q-card v-if="detail" flat class="app-glass-card">
+    <q-card v-if="detail" bordered>
       <q-card-section class="row q-col-gutter-lg items-start">
         <div class="col-12 col-lg">
           <div class="text-h6 text-weight-bold">{{ currentMessage.from_name || currentMessage.from_address || '未知发件人' }}</div>
           <div class="text-body2 text-grey-7 q-mt-xs">{{ currentMessage.from_address || '未知地址' }}</div>
           <div class="row q-gutter-sm q-mt-md">
-            <q-badge color="blue-1" text-color="primary">{{ currentMessage.folder || '未知文件夹' }}</q-badge>
-            <q-badge v-if="currentMessage.has_attachment" color="deep-purple-1" text-color="deep-purple-8">含附件</q-badge>
+            <q-badge color="grey-3" text-color="dark">{{ currentMessage.folder || '未知文件夹' }}</q-badge>
+            <q-badge v-if="currentMessage.has_attachment" color="grey-3" text-color="dark">含附件</q-badge>
           </div>
         </div>
         <div class="col-12 col-lg-auto text-grey-7">
@@ -63,8 +63,8 @@
       <template v-if="currentAttachments.length > 0">
         <q-separator />
         <q-card-section>
-          <div class="section-title q-mb-md">附件</div>
-          <q-list bordered separator class="rounded-borders overflow-hidden">
+          <div class="text-subtitle1 text-weight-bold q-mb-md">附件</div>
+          <q-list bordered separator>
             <q-item v-for="attachment in currentAttachments" :key="attachment.id" clickable @click="downloadAttachment(attachment.id)">
               <q-item-section avatar>
                 <q-icon name="attach_file" color="primary" />
@@ -128,48 +128,11 @@ const sanitizedHtml = computed(() => {
   }
   const sanitized = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
-      'a',
-      'abbr',
-      'b',
-      'blockquote',
-      'br',
-      'code',
-      'div',
-      'em',
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'h5',
-      'h6',
-      'hr',
-      ...(showRemoteImages.value ? ['img'] : []),
-      'li',
-      'ol',
-      'p',
-      'pre',
-      'span',
-      'strong',
-      'table',
-      'tbody',
-      'td',
-      'th',
-      'thead',
-      'tr',
-      'u',
-      'ul',
+      'a', 'abbr', 'b', 'blockquote', 'br', 'code', 'div', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr',
+      ...(showRemoteImages.value ? ['img'] : []), 'li', 'ol', 'p', 'pre', 'span', 'strong', 'table', 'tbody',
+      'td', 'th', 'thead', 'tr', 'u', 'ul',
     ],
-    ALLOWED_ATTR: [
-      'alt',
-      'class',
-      'colspan',
-      'href',
-      'rowspan',
-      ...(showRemoteImages.value ? ['src'] : []),
-      'style',
-      'target',
-      'title',
-    ],
+    ALLOWED_ATTR: ['alt', 'class', 'colspan', 'href', 'rowspan', ...(showRemoteImages.value ? ['src'] : []), 'style', 'target', 'title'],
     ALLOW_DATA_ATTR: false,
     FORBID_TAGS: ['form', 'iframe', 'input', 'script', 'style'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],

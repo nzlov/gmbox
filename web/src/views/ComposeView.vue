@@ -6,25 +6,17 @@
     subtitle="复用已保存的邮箱配置直接发信，把常用字段、抄送和 HTML 正文开关集中到同一编辑面板。"
     @logout="logout"
   >
-    <div class="row q-col-gutter-lg">
+    <div class="row q-col-gutter-md">
       <div class="col-12 col-xl-8">
-        <q-card flat class="app-glass-card">
+        <q-card bordered>
           <q-card-section>
-            <div class="section-title">邮件内容</div>
-            <div class="section-subtitle q-mt-xs">发件账户来自邮箱管理页，地址输入支持英文逗号分隔。</div>
+            <div class="text-subtitle1 text-weight-bold">邮件内容</div>
+            <div class="text-body2 text-grey-7 q-mt-xs">发件账户来自邮箱管理页，地址输入支持英文逗号分隔。</div>
           </q-card-section>
 
           <q-card-section class="q-pt-none">
             <q-form class="column q-gutter-md" @submit.prevent="submit">
-              <q-select
-                v-model="form.account_id"
-                outlined
-                dense
-                emit-value
-                map-options
-                :options="accountOptions"
-                label="发件邮箱"
-              />
+              <q-select v-model="form.account_id" outlined dense emit-value map-options :options="accountOptions" label="发件邮箱" />
               <q-input v-model="form.to" outlined dense label="收件人" hint="多个地址用英文逗号分隔" />
               <div class="row q-col-gutter-md">
                 <div class="col-12 col-md-6">
@@ -46,12 +38,12 @@
       </div>
 
       <div class="col-12 col-xl-4">
-        <q-card flat class="app-glass-card full-height">
+        <q-card bordered>
           <q-card-section>
-            <div class="section-title">发送说明</div>
-            <div class="section-subtitle q-mt-xs">减少发信时遗漏配置的概率。</div>
+            <div class="text-subtitle1 text-weight-bold">发送说明</div>
+            <div class="text-body2 text-grey-7 q-mt-xs">减少发信时遗漏配置的概率。</div>
           </q-card-section>
-          <q-list separator>
+          <q-list bordered separator>
             <q-item>
               <q-item-section avatar>
                 <q-icon name="settings" color="primary" />

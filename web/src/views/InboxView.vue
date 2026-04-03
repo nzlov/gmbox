@@ -7,19 +7,19 @@
     @logout="logout"
   >
     <template #actions>
-      <q-btn flat round dense color="white" icon="refresh" @click="refreshAll" />
+      <q-btn flat round dense icon="refresh" @click="refreshAll" />
     </template>
 
     <template #hero-actions>
       <q-btn color="primary" unelevated no-caps icon="refresh" label="刷新列表" @click="refreshAll" />
     </template>
 
-    <div class="row q-col-gutter-lg">
+    <div class="row q-col-gutter-md">
       <div class="col-12 col-lg-4 col-xl-3">
-        <q-card flat class="app-glass-card full-height">
+        <q-card bordered>
           <q-card-section>
-            <div class="section-title">邮箱与文件夹</div>
-            <div class="section-subtitle q-mt-xs">切换账户后会联动刷新文件夹与邮件列表。</div>
+            <div class="text-subtitle1 text-weight-bold">邮箱与文件夹</div>
+            <div class="text-body2 text-grey-7 q-mt-xs">切换账户后会联动刷新文件夹与邮件列表。</div>
           </q-card-section>
           <q-card-section class="q-pt-none">
             <q-select
@@ -33,52 +33,44 @@
               @update:model-value="handleAccountChange"
             />
           </q-card-section>
-          <q-card-section class="q-pt-none">
-            <q-list separator>
-              <q-item clickable :active="selectedFolder === ''" active-class="bg-primary text-white" @click="selectFolder('')">
-                <q-item-section>
-                  <q-item-label>全部文件夹</q-item-label>
-                  <q-item-label caption :class="selectedFolder === '' ? 'text-white' : 'text-grey-6'">显示当前筛选下的所有邮件</q-item-label>
-                </q-item-section>
-                <q-item-section side>
-                  <q-badge color="primary" text-color="white">{{ total }}</q-badge>
-                </q-item-section>
-              </q-item>
-              <q-item
-                v-for="mailbox in mailboxes"
-                :key="mailbox.id"
-                clickable
-                :active="selectedFolder === mailbox.path"
-                active-class="bg-primary text-white"
-                @click="selectFolder(mailbox.path)"
-              >
-                <q-item-section>
-                  <q-item-label>{{ mailbox.name }}</q-item-label>
-                  <q-item-label caption :class="selectedFolder === mailbox.path ? 'text-white' : 'text-grey-6'">
-                    {{ mailbox.role || mailbox.path }}
-                  </q-item-label>
-                </q-item-section>
-              </q-item>
-            </q-list>
-          </q-card-section>
+          <q-list bordered separator>
+            <q-item clickable :active="selectedFolder === ''" active-class="bg-primary text-white" @click="selectFolder('')">
+              <q-item-section>
+                <q-item-label>全部文件夹</q-item-label>
+                <q-item-label caption :class="selectedFolder === '' ? 'text-white' : 'text-grey-6'">显示当前筛选下的所有邮件</q-item-label>
+              </q-item-section>
+              <q-item-section side>
+                <q-badge color="primary" text-color="white">{{ total }}</q-badge>
+              </q-item-section>
+            </q-item>
+            <q-item
+              v-for="mailbox in mailboxes"
+              :key="mailbox.id"
+              clickable
+              :active="selectedFolder === mailbox.path"
+              active-class="bg-primary text-white"
+              @click="selectFolder(mailbox.path)"
+            >
+              <q-item-section>
+                <q-item-label>{{ mailbox.name }}</q-item-label>
+                <q-item-label caption :class="selectedFolder === mailbox.path ? 'text-white' : 'text-grey-6'">
+                  {{ mailbox.role || mailbox.path }}
+                </q-item-label>
+              </q-item-section>
+            </q-item>
+          </q-list>
         </q-card>
       </div>
 
       <div class="col-12 col-lg-8 col-xl-9">
-        <q-card flat class="app-glass-card">
+        <q-card bordered>
           <q-card-section class="row q-col-gutter-md items-center">
             <div class="col-12 col-md">
-              <div class="section-title">邮件列表</div>
-              <div class="section-subtitle q-mt-xs">按时间倒序展示，支持关键词搜索与分页切换。</div>
+              <div class="text-subtitle1 text-weight-bold">邮件列表</div>
+              <div class="text-body2 text-grey-7 q-mt-xs">按时间倒序展示，支持关键词搜索与分页切换。</div>
             </div>
             <div class="col-12 col-md-5">
-              <q-input
-                v-model.trim="keywordInput"
-                outlined
-                dense
-                label="搜索主题、发件人或摘要"
-                @keyup.enter="applyKeywordNow"
-              >
+              <q-input v-model.trim="keywordInput" outlined dense label="搜索主题、发件人或摘要" @keyup.enter="applyKeywordNow">
                 <template #append>
                   <q-btn v-if="keywordInput" flat round dense icon="close" @click="clearKeyword" />
                 </template>
@@ -106,33 +98,22 @@
               {{ error }}
             </q-banner>
 
-            <q-list v-if="messages.length > 0" separator>
-              <q-item
-                v-for="item in messages"
-                :key="item.id"
-                clickable
-                class="mail-list-item"
-                :class="item.is_read ? 'mail-read-card' : 'mail-unread-card'"
-                @click="openDetail(item.id)"
-              >
+            <q-list v-if="messages.length > 0" bordered separator>
+              <q-item v-for="item in messages" :key="item.id" clickable @click="openDetail(item.id)">
                 <q-item-section>
-                  <q-item-label class="text-subtitle1 text-weight-medium">
+                  <q-item-label :class="item.is_read ? 'text-subtitle2' : 'text-subtitle2 text-weight-bold'">
                     {{ item.subject || '(无主题)' }}
                   </q-item-label>
-                  <q-item-label caption class="q-mt-xs">
-                    {{ item.from_name || item.from_address }}
-                  </q-item-label>
-                  <q-item-label caption class="q-mt-xs text-grey-7">
-                    {{ item.snippet || '暂无摘要' }}
-                  </q-item-label>
+                  <q-item-label caption class="q-mt-xs">{{ item.from_name || item.from_address }}</q-item-label>
+                  <q-item-label caption class="q-mt-xs text-grey-7">{{ item.snippet || '暂无摘要' }}</q-item-label>
                   <div class="row q-gutter-sm q-mt-sm">
-                    <q-badge color="blue-1" text-color="primary">{{ item.folder }}</q-badge>
-                    <q-badge v-if="item.has_attachment" color="deep-purple-1" text-color="deep-purple-8">含附件</q-badge>
+                    <q-badge color="grey-3" text-color="dark">{{ item.folder }}</q-badge>
+                    <q-badge v-if="item.has_attachment" color="grey-3" text-color="dark">含附件</q-badge>
+                    <q-badge v-if="!item.is_read" color="primary" text-color="white">未读</q-badge>
                   </div>
                 </q-item-section>
                 <q-item-section side top>
                   <div class="text-caption text-grey-6">{{ formatDate(item.sent_at) }}</div>
-                  <q-icon v-if="!item.is_read" name="mark_email_unread" color="primary" size="20px" class="q-mt-sm" />
                 </q-item-section>
               </q-item>
             </q-list>
@@ -324,24 +305,3 @@ onBeforeUnmount(() => {
 
 onMounted(refreshAll)
 </script>
-
-<style scoped>
-.mail-list-item {
-  border-radius: 18px;
-  margin-bottom: 10px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.mail-list-item:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-}
-
-.mail-unread-card {
-  background: linear-gradient(135deg, rgba(219, 234, 254, 0.62), rgba(255, 255, 255, 0.88));
-}
-
-.mail-read-card {
-  background: rgba(255, 255, 255, 0.72);
-}
-</style>
