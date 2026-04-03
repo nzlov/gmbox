@@ -76,7 +76,7 @@
       </q-table>
     </q-card>
 
-    <q-dialog v-model="showModal" @hide="closeModal">
+    <q-dialog v-model="showModal" persistent @hide="closeModal">
         <q-card class="full-width" style="max-width: 920px">
         <q-card-section class="row items-start justify-between q-col-gutter-md">
           <div class="col">
@@ -210,7 +210,7 @@
       </q-card>
     </q-dialog>
 
-    <q-dialog v-model="showImportModal" @hide="closeImportModal">
+    <q-dialog v-model="showImportModal" persistent @hide="closeImportModal">
         <q-card class="full-width" style="max-width: 920px">
         <q-card-section class="row items-start justify-between q-col-gutter-md">
           <div class="col">
