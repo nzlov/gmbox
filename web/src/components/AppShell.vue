@@ -5,10 +5,10 @@
         <q-btn flat round dense icon="menu" class="lt-md q-mr-sm" @click="drawerOpen = !drawerOpen" />
         <div class="row items-center no-wrap q-gutter-sm">
           <q-avatar color="primary" text-color="white" icon="mail" />
-          <div>
+          <q-toolbar-title class="q-pa-none">
             <div class="text-weight-bold">gmbox</div>
             <div class="text-caption text-blue-1">统一邮箱工作台</div>
-          </div>
+          </q-toolbar-title>
         </div>
         <q-space />
         <slot name="actions" />
@@ -17,13 +17,15 @@
 
     <q-drawer v-model="drawerOpen" show-if-above bordered :width="272" class="app-shell-drawer">
       <div class="drawer-inner column no-wrap full-height q-pa-md">
-        <q-card flat class="app-brand-card q-mb-md">
-          <q-card-section>
-            <div class="text-overline text-primary">{{ eyebrow || '工作台' }}</div>
-            <div class="text-h5 text-weight-bold q-mt-xs">{{ title }}</div>
-            <div v-if="subtitle" class="text-body2 text-grey-7 q-mt-sm">{{ subtitle }}</div>
-          </q-card-section>
-        </q-card>
+        <div class="drawer-brand q-mb-md q-px-sm q-pt-sm q-pb-md">
+          <div class="row items-center q-gutter-sm no-wrap">
+            <q-avatar color="primary" text-color="white" icon="mail" />
+            <div>
+              <div class="text-subtitle1 text-weight-bold">gmbox</div>
+              <div class="text-caption text-grey-7">邮件工作台导航</div>
+            </div>
+          </div>
+        </div>
 
         <q-list padding>
           <q-item
@@ -114,13 +116,13 @@ const navItems: Array<{ key: NavKey; label: string; caption: string; to: string;
 .app-shell-drawer {
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(18px);
+  border-right: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .drawer-inner {
   min-height: 100%;
 }
 
-.app-brand-card,
 .app-page-hero {
   background: rgba(255, 255, 255, 0.84);
   border: 1px solid rgba(148, 163, 184, 0.16);
@@ -134,8 +136,12 @@ const navItems: Array<{ key: NavKey; label: string; caption: string; to: string;
   border-radius: 16px;
 }
 
+.drawer-brand {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
 .app-page {
-  max-width: 1600px;
+  max-width: 1440px;
   margin: 0 auto;
 }
 </style>
