@@ -9,8 +9,12 @@
 - `JWT + HttpOnly Cookie` 登录
 - 邮箱账户 CRUD
 - 邮箱密码 `AES-GCM` 加密存储
-- `cron/v3` 定时同步骨架
+- `cron/v3` 定时同步
+- `IMAP` 增量收件
+- `POP3 UIDL` 去重收件
+- `SMTP` 发信接口
 - Gmail 风格前端基础页面
+- Gmail 风格写信页
 - Go `embed` 嵌入前端构建产物
 - Docker 多阶段构建
 

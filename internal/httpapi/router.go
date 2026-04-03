@@ -164,6 +164,38 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		c.JSON(http.StatusOK, messages)
 	})
 
+	protected.GET("/messages/:id", func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "邮件 ID 不合法"})
+			return
+		}
+		var message model.Message
+		if err := app.DB.First(&message, id).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"message": "邮件不存在"})
+			return
+		}
+		var body model.MessageBody
+		if err := app.DB.Where("message_id = ?", message.Model.ID).First(&body).Error; err != nil && err != gorm.ErrRecordNotFound {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询邮件正文失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": message, "body": body})
+	})
+
+	protected.POST("/messages/send", func(c *gin.Context) {
+		var input mail.SendInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
+			return
+		}
+		if err := app.Mailer.Send(c.Request.Context(), input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "发送成功"})
+	})
+
 	protected.GET("/sync-states", func(c *gin.Context) {
 		var states []model.SyncState
 		if err := app.DB.Order("id desc").Find(&states).Error; err != nil {

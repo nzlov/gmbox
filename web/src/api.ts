@@ -24,6 +24,13 @@ export interface MessageItem {
   sent_at: string
 }
 
+export interface MessageBody {
+  id: number
+  message_id: number
+  text_body: string
+  html_body: string
+}
+
 // request 封装统一请求入口，确保所有页面都带上 Cookie。
 export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {

@@ -87,6 +87,9 @@ func (s *Service) DecryptPassword(account model.MailAccount) (string, error) {
 
 // TestConnection 对入站和出站地址做最小连通性验证，避免明显配置错误直接入库。
 func (s *Service) TestConnection(ctx context.Context, account model.MailAccount) error {
+	if _, err := s.DecryptPassword(account); err != nil {
+		return err
+	}
 	if account.IncomingProtocol == "imap" {
 		if err := probe(ctx, account.IMAPHost, account.IMAPPort, account.UseTLS); err != nil {
 			return fmt.Errorf("IMAP 连接失败: %w", err)

@@ -8,6 +8,7 @@
       <nav class="nav-links">
         <RouterLink to="/inbox">聚合收件箱</RouterLink>
         <RouterLink to="/accounts">邮箱管理</RouterLink>
+        <RouterLink to="/compose">写信</RouterLink>
       </nav>
     </aside>
 

@@ -193,12 +193,18 @@ select {
 }
 
 .form-grid input,
-.form-grid select {
+.form-grid select,
+.compose-area {
   width: 100%;
   border: 1px solid #d6def0;
   border-radius: 14px;
   background: #fff;
   padding: 12px 14px;
+}
+
+.compose-area {
+  min-height: 280px;
+  resize: vertical;
 }
 
 .primary-btn,
@@ -221,6 +227,16 @@ select {
 
 .error-text {
   color: #b42318;
+}
+
+.success-text {
+  color: #027a48;
+}
+
+.compose-tips {
+  display: grid;
+  align-content: start;
+  gap: 12px;
 }
 
 .empty-state {

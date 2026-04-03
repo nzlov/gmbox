@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -17,11 +17,10 @@ import (
 
 // Syncer 负责按照 cron 表达式调度多邮箱并发同步。
 type Syncer struct {
-	cfg     *appcfg.Config
-	db      *gorm.DB
-	mailer  *Service
-	cron    *cron.Cron
-	running sync.Mutex
+	cfg    *appcfg.Config
+	db     *gorm.DB
+	mailer *Service
+	cron   *cron.Cron
 }
 
 // NewSyncer 创建 cron 同步器。
@@ -89,7 +88,9 @@ func (s *Syncer) RunAccountNow(ctx context.Context, account model.MailAccount) e
 func (s *Syncer) syncAccount(ctx context.Context, account model.MailAccount) error {
 	start := time.Now()
 	state := model.SyncState{AccountID: account.Model.ID}
-	s.db.Where("account_id = ?", account.Model.ID).FirstOrCreate(&state, model.SyncState{AccountID: account.Model.ID})
+	if err := s.db.Where("account_id = ?", account.Model.ID).FirstOrCreate(&state, model.SyncState{AccountID: account.Model.ID}).Error; err != nil {
+		return err
+	}
 
 	now := time.Now()
 	state.Running = true
@@ -98,7 +99,12 @@ func (s *Syncer) syncAccount(ctx context.Context, account model.MailAccount) err
 	state.LastSyncAt = &now
 	_ = s.db.Save(&state).Error
 
-	err := s.mailer.TestConnection(ctx, account)
+	var err error
+	if account.IncomingProtocol == "imap" {
+		err = s.mailer.SyncIMAP(ctx, account, &state, s.cfg.Mail.FetchBody)
+	} else {
+		err = s.mailer.SyncPOP3(ctx, account, &state, s.cfg.Mail.FetchBody)
+	}
 	finished := time.Now()
 	state.Running = false
 	state.LastSyncAt = &finished
@@ -106,12 +112,14 @@ func (s *Syncer) syncAccount(ctx context.Context, account model.MailAccount) err
 	if err != nil {
 		state.LastStatus = "error"
 		state.LastError = err.Error()
-		state.LastMessage = "同步骨架执行失败"
+		state.LastMessage = "同步执行失败"
 		_ = s.db.Save(&state).Error
 		return err
 	}
 	state.LastStatus = "ok"
 	state.LastError = ""
-	state.LastMessage = "同步骨架已运行，协议拉取逻辑可在此基础上继续扩展"
+	if strings.TrimSpace(state.LastMessage) == "" {
+		state.LastMessage = "同步完成"
+	}
 	return s.db.Save(&state).Error
 }

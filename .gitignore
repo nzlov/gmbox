@@ -4,3 +4,4 @@ frontend/dist/
 data/
 dist/
 *.log
+server
