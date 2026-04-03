@@ -158,7 +158,8 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "生成 OAuth state 失败"})
 			return
 		}
-		redirectURL, err := app.Mailer.BuildMicrosoftPKCEOAuthURL(state, resolveMicrosoftOAuthLegacyRedirectURL(c, app), "")
+		loginHint := strings.TrimSpace(c.Query("login_hint"))
+		redirectURL, err := app.Mailer.BuildMicrosoftPKCEOAuthURL(state, resolveMicrosoftOAuthLegacyRedirectURL(c, app), "", loginHint)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 			return

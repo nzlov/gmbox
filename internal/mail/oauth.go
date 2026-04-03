@@ -51,11 +51,11 @@ func (s *Service) MicrosoftOAuthEnabled() bool {
 
 // BuildMicrosoftOAuthURL 生成微软授权跳转地址，供前端发起 OAuth 登录。
 func (s *Service) BuildMicrosoftOAuthURL(state string) (string, error) {
-	return s.BuildMicrosoftPKCEOAuthURL(state, s.cfg.MicrosoftOAuth.RedirectURL, "")
+	return s.BuildMicrosoftPKCEOAuthURL(state, s.cfg.MicrosoftOAuth.RedirectURL, "", "")
 }
 
 // BuildMicrosoftPKCEOAuthURL 统一组装微软授权地址，兼容传统服务端回跳和前端 PKCE 流程。
-func (s *Service) BuildMicrosoftPKCEOAuthURL(state string, redirectURI string, codeChallenge string) (string, error) {
+func (s *Service) BuildMicrosoftPKCEOAuthURL(state string, redirectURI string, codeChallenge string, loginHint string) (string, error) {
 	if !s.MicrosoftOAuthEnabled() {
 		return "", fmt.Errorf("微软 OAuth 未配置，请先设置 client_id 和 client_secret")
 	}
@@ -70,6 +70,9 @@ func (s *Service) BuildMicrosoftPKCEOAuthURL(state string, redirectURI string, c
 	query.Set("scope", microsoftAuthorizeScope)
 	query.Set("state", state)
 	query.Set("prompt", "select_account")
+	if strings.TrimSpace(loginHint) != "" {
+		query.Set("login_hint", strings.TrimSpace(loginHint))
+	}
 	if strings.TrimSpace(codeChallenge) != "" {
 		query.Set("code_challenge", codeChallenge)
 		query.Set("code_challenge_method", "S256")
@@ -100,6 +103,7 @@ func (s *Service) UpsertMicrosoftOAuthAccountWithPKCE(ctx context.Context, code 
 		"grant_type":   []string{"authorization_code"},
 		"code":         []string{code},
 		"redirect_uri": []string{redirectURI},
+		"scope":        []string{microsoftAuthorizeScope},
 	}
 	if strings.TrimSpace(codeVerifier) != "" {
 		form.Set("code_verifier", codeVerifier)

@@ -12,7 +12,7 @@
     </template>
 
     <q-card bordered>
-      <q-card-section v-if="message || error" class="q-pt-none">
+      <q-card-section v-if="(message || error) && !showModal && !showImportModal" class="q-pt-none">
         <q-banner v-if="message" rounded class="bg-green-1 text-positive q-mb-sm">{{ message }}</q-banner>
         <q-banner v-if="error" rounded class="bg-red-1 text-negative">{{ error }}</q-banner>
       </q-card-section>
@@ -91,6 +91,13 @@
         <q-separator />
 
         <q-card-section>
+          <q-banner v-if="showModal && error" rounded class="bg-red-1 text-negative q-mb-md">
+            {{ error }}
+          </q-banner>
+          <q-banner v-if="showModal && message" rounded class="bg-green-1 text-positive q-mb-md">
+            {{ message }}
+          </q-banner>
+
           <q-form class="row q-col-gutter-md" @submit.prevent="submit">
             <div class="col-12">
               <q-select
@@ -225,6 +232,13 @@
         <q-separator />
 
         <q-card-section class="column q-gutter-md">
+          <q-banner v-if="showImportModal && error" rounded class="bg-red-1 text-negative">
+            {{ error }}
+          </q-banner>
+          <q-banner v-if="showImportModal && message" rounded class="bg-green-1 text-positive">
+            {{ message }}
+          </q-banner>
+
           <q-input
             v-model="importText"
             outlined
@@ -412,6 +426,11 @@ function applyProviderPreset(providerKey: string) {
 // handleProviderChange 在切换服务商时更新默认配置，并收敛不兼容的 OAuth 选项。
 function handleProviderChange() {
   applyProviderPreset(form.provider)
+  if (form.provider === 'outlook' && microsoftOAuthEnabled.value) {
+    form.auth_type = 'oauth'
+    handleAuthTypeChange()
+    return
+  }
   if (form.provider !== 'custom' && currentProviderPreset.value) {
     form.provider_name = currentProviderPreset.value.name
   }
@@ -644,12 +663,17 @@ async function startMicrosoftOAuth() {
   error.value = ''
   message.value = ''
   try {
+    const loginHint = resolveOAuthLoginHint()
     const config = await request<MicrosoftOAuthConfigResponse>('/api/accounts/oauth/microsoft/config')
     if (!config.enabled) {
       throw new Error('微软 OAuth 未配置，请先设置 client_id 和 client_secret')
     }
     if (config.flow === 'legacy') {
-      const popup = window.open('/api/accounts/oauth/microsoft/start?popup=1', 'microsoft-oauth', 'popup=yes,width=640,height=760')
+      const legacyQuery = new URLSearchParams({ popup: '1' })
+      if (loginHint) {
+        legacyQuery.set('login_hint', loginHint)
+      }
+      const popup = window.open(`/api/accounts/oauth/microsoft/start?${legacyQuery.toString()}`, 'microsoft-oauth', 'popup=yes,width=640,height=760')
       if (!popup) {
         throw new Error('浏览器拦截了授权弹窗，请允许弹窗后重试')
       }
@@ -670,6 +694,9 @@ async function startMicrosoftOAuth() {
       code_challenge: challenge,
       code_challenge_method: 'S256',
     })
+    if (loginHint) {
+      query.set('login_hint', loginHint)
+    }
     const popup = window.open(
       `https://login.microsoftonline.com/${config.tenant_id}/oauth2/v2.0/authorize?${query.toString()}`,
       'microsoft-oauth',
@@ -682,6 +709,11 @@ async function startMicrosoftOAuth() {
   } catch (err) {
     error.value = err instanceof Error ? err.message : '发起微软 OAuth 失败'
   }
+}
+
+// resolveOAuthLoginHint 优先使用用户名，没有时退回邮箱，减少微软授权页重复输入账号。
+function resolveOAuthLoginHint() {
+  return form.username.trim() || form.email.trim()
 }
 
 // handleOAuthMessage 只接收同源回调页发来的结果，避免无关页面干扰当前列表状态。
