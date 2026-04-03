@@ -4,12 +4,14 @@ import InboxView from '@/views/InboxView.vue'
 import AccountsView from '@/views/AccountsView.vue'
 import ComposeView from '@/views/ComposeView.vue'
 import MessageDetailView from '@/views/MessageDetailView.vue'
+import MicrosoftOAuthCallbackView from '@/views/MicrosoftOAuthCallbackView.vue'
 
 // router 统一维护页面切换和登录前置校验。
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: LoginView },
+    { path: '/oauth/microsoft/callback', component: MicrosoftOAuthCallbackView },
     { path: '/', redirect: '/inbox' },
     { path: '/inbox', component: InboxView, meta: { auth: true } },
     { path: '/accounts', component: AccountsView, meta: { auth: true } },

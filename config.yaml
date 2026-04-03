@@ -30,4 +30,4 @@ microsoft_oauth:
   tenant_id: common
   client_id: ""
   client_secret: ""
-  redirect_url: http://127.0.0.1:8080/api/accounts/oauth/microsoft/callback
+  redirect_url: ""

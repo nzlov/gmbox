@@ -136,8 +136,7 @@ func defaults() *Config {
 			Dist: "frontend/dist",
 		},
 		MicrosoftOAuth: MicrosoftOAuthConfig{
-			TenantID:    "common",
-			RedirectURL: "http://127.0.0.1:8080/api/accounts/oauth/microsoft/callback",
+			TenantID: "common",
 		},
 	}
 }

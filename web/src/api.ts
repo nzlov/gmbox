@@ -37,6 +37,20 @@ export interface AccountProvidersResponse {
   microsoft_oauth_enabled: boolean
 }
 
+export interface MicrosoftOAuthConfigResponse {
+  enabled: boolean
+  client_id: string
+  tenant_id: string
+  redirect_uri: string
+  scope: string
+  flow: 'pkce' | 'legacy'
+}
+
+export interface MicrosoftOAuthExchangeResponse {
+  message: string
+  account: MailAccount
+}
+
 export interface MessageItem {
   id: number
   account_id: number

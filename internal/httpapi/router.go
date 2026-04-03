@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -83,6 +84,21 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			"microsoft_oauth_enabled": app.Mailer.MicrosoftOAuthEnabled(),
 		})
 	})
+	protected.GET("/accounts/oauth/microsoft/config", func(c *gin.Context) {
+		tenantID := strings.TrimSpace(app.Config.MicrosoftOAuth.TenantID)
+		if tenantID == "" {
+			tenantID = "common"
+		}
+		redirectURL := resolveMicrosoftOAuthFrontendRedirectURL(c, app)
+		c.JSON(http.StatusOK, gin.H{
+			"enabled":      app.Mailer.MicrosoftOAuthEnabled(),
+			"client_id":    app.Config.MicrosoftOAuth.ClientID,
+			"tenant_id":    tenantID,
+			"redirect_uri": redirectURL,
+			"scope":        mail.MicrosoftOAuthScope(),
+			"flow":         microsoftOAuthFlow(redirectURL),
+		})
+	})
 
 	protected.GET("/accounts", func(c *gin.Context) {
 		var accounts []model.MailAccount
@@ -142,37 +158,69 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "生成 OAuth state 失败"})
 			return
 		}
-		redirectURL, err := app.Mailer.BuildMicrosoftOAuthURL(state)
+		redirectURL, err := app.Mailer.BuildMicrosoftPKCEOAuthURL(state, resolveMicrosoftOAuthLegacyRedirectURL(c, app), "")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 			return
 		}
 		c.SetCookie("gmbox_oauth_state", state, 600, "/", "", false, true)
+		if c.Query("popup") == "1" {
+			c.SetCookie("gmbox_oauth_popup", "1", 600, "/", "", false, true)
+		} else {
+			c.SetCookie("gmbox_oauth_popup", "", -1, "/", "", false, true)
+		}
 		c.Redirect(http.StatusFound, redirectURL)
 	})
 
 	protected.GET("/accounts/oauth/microsoft/callback", func(c *gin.Context) {
+		popup := isOAuthPopup(c)
 		state, err := c.Cookie("gmbox_oauth_state")
 		if err != nil || state == "" || state != c.Query("state") {
-			redirectAccounts(c, "oauth_error", "微软 OAuth state 校验失败，请重试")
+			respondOAuthResult(c, popup, false, "微软 OAuth state 校验失败，请重试")
 			return
 		}
 		c.SetCookie("gmbox_oauth_state", "", -1, "/", "", false, true)
+		c.SetCookie("gmbox_oauth_popup", "", -1, "/", "", false, true)
 		if queryErr := strings.TrimSpace(c.Query("error")); queryErr != "" {
-			redirectAccounts(c, "oauth_error", queryErr)
+			respondOAuthResult(c, popup, false, queryErr)
 			return
 		}
 		code := strings.TrimSpace(c.Query("code"))
 		if code == "" {
-			redirectAccounts(c, "oauth_error", "微软 OAuth 未返回授权码")
+			respondOAuthResult(c, popup, false, "微软 OAuth 未返回授权码")
 			return
 		}
-		account, err := app.Mailer.UpsertMicrosoftOAuthAccount(c.Request.Context(), code)
+		account, err := app.Mailer.UpsertMicrosoftOAuthAccount(c.Request.Context(), code, resolveMicrosoftOAuthLegacyRedirectURL(c, app))
 		if err != nil {
-			redirectAccounts(c, "oauth_error", err.Error())
+			respondOAuthResult(c, popup, false, err.Error())
 			return
 		}
-		redirectAccounts(c, "oauth_success", fmt.Sprintf("微软 OAuth 登录成功，已接入邮箱 %s", account.Email))
+		respondOAuthResult(c, popup, true, fmt.Sprintf("微软 OAuth 登录成功，已接入邮箱 %s", account.Email))
+	})
+	protected.POST("/accounts/oauth/microsoft/exchange", func(c *gin.Context) {
+		var req struct {
+			Code         string `json:"code" binding:"required"`
+			CodeVerifier string `json:"code_verifier" binding:"required"`
+			State        string `json:"state" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
+			return
+		}
+		account, err := app.Mailer.UpsertMicrosoftOAuthAccountWithPKCE(
+			c.Request.Context(),
+			strings.TrimSpace(req.Code),
+			strings.TrimSpace(req.CodeVerifier),
+			resolveMicrosoftOAuthFrontendRedirectURL(c, app),
+		)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message": fmt.Sprintf("微软 OAuth 登录成功，已接入邮箱 %s", account.Email),
+			"account": account,
+		})
 	})
 
 	protected.PUT("/accounts/:id", func(c *gin.Context) {
@@ -447,4 +495,79 @@ func loadAccount(c *gin.Context, db *gorm.DB) (*model.MailAccount, bool) {
 func redirectAccounts(c *gin.Context, key string, value string) {
 	query := fmt.Sprintf("/accounts?%s=%s", key, url.QueryEscape(value))
 	c.Redirect(http.StatusFound, query)
+}
+
+// resolveMicrosoftOAuthFrontendRedirectURL 优先使用显式配置，未配置时按当前访问入口动态推导前端回调地址。
+func resolveMicrosoftOAuthFrontendRedirectURL(c *gin.Context, app *runtime.App) string {
+	configured := strings.TrimSpace(app.Config.MicrosoftOAuth.RedirectURL)
+	if configured != "" {
+		return configured
+	}
+	return requestBaseURL(c) + "/oauth/microsoft/callback"
+}
+
+// resolveMicrosoftOAuthLegacyRedirectURL 优先使用显式配置的旧 API 回调地址，未配置时再按当前访问入口推导。
+func resolveMicrosoftOAuthLegacyRedirectURL(c *gin.Context, app *runtime.App) string {
+	configured := strings.TrimSpace(app.Config.MicrosoftOAuth.RedirectURL)
+	if configured != "" {
+		return configured
+	}
+	return requestBaseURL(c) + "/api/accounts/oauth/microsoft/callback"
+}
+
+// microsoftOAuthFlow 根据回调地址判断当前应使用 PKCE 还是旧服务端兼容流。
+func microsoftOAuthFlow(redirectURL string) string {
+	if strings.HasSuffix(strings.TrimSpace(redirectURL), "/api/accounts/oauth/microsoft/callback") {
+		return "legacy"
+	}
+	return "pkce"
+}
+
+// isOAuthPopup 判断旧服务端流是否由弹窗发起，以便回调时选择 postMessage 还是页面重定向。
+func isOAuthPopup(c *gin.Context) bool {
+	value, _ := c.Cookie("gmbox_oauth_popup")
+	return strings.TrimSpace(value) == "1"
+}
+
+// respondOAuthResult 统一兼容弹窗回调与页面回跳两种结果返回方式。
+func respondOAuthResult(c *gin.Context, popup bool, success bool, message string) {
+	if !popup {
+		if success {
+			redirectAccounts(c, "oauth_success", message)
+			return
+		}
+		redirectAccounts(c, "oauth_error", message)
+		return
+	}
+	payload, err := json.Marshal(gin.H{
+		"type":    "microsoft-oauth",
+		"success": success,
+		"message": message,
+	})
+	if err != nil {
+		c.String(http.StatusInternalServerError, "OAuth 结果序列化失败")
+		return
+	}
+	html := fmt.Sprintf(`<!doctype html><html><body><script>
+window.opener && window.opener.postMessage(%s, window.location.origin);
+window.close();
+</script></body></html>`, payload)
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+}
+
+// requestBaseURL 优先尊重反向代理透传的协议和主机，避免 OAuth 回调地址落成内网地址。
+func requestBaseURL(c *gin.Context) string {
+	scheme := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto"))
+	if scheme == "" {
+		if c.Request.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	if host == "" {
+		host = c.Request.Host
+	}
+	return fmt.Sprintf("%s://%s", scheme, host)
 }

@@ -251,10 +251,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { request, type AccountProvidersResponse, type MailAccount, type ProviderPreset } from '@/api'
+import {
+  request,
+  type AccountProvidersResponse,
+  type MailAccount,
+  type MicrosoftOAuthConfigResponse,
+  type ProviderPreset,
+} from '@/api'
 import AppShell from '@/components/AppShell.vue'
+import { createCodeChallenge, createMicrosoftOAuthSession, saveMicrosoftOAuthSession } from '@/utils/oauth'
+
+type MicrosoftOAuthMessage = {
+  type: 'microsoft-oauth'
+  success: boolean
+  message: string
+}
 
 type AccountForm = {
   provider: string
@@ -290,6 +303,7 @@ const importText = ref('')
 const tableFilter = ref('')
 const tablePagination = { rowsPerPage: 10 }
 const form = reactive<AccountForm>(createDefaultForm())
+let oauthPopup: Window | null = null
 
 const hasSelection = computed(() => selectedRows.value.length > 0)
 const currentProviderPreset = computed(() => providers.value.find((item) => item.key === form.provider) ?? null)
@@ -625,9 +639,72 @@ function normalizeBoolean(value?: string) {
   return ['1', 'true', 'yes', 'y', 'on'].includes(lower)
 }
 
-// startMicrosoftOAuth 直接跳转到后端授权入口，把换码和落库留给服务端处理。
-function startMicrosoftOAuth() {
-  window.location.href = '/api/accounts/oauth/microsoft/start'
+// startMicrosoftOAuth 由前端生成 PKCE 参数并拉起弹窗，避免整页跳转打断当前表单。
+async function startMicrosoftOAuth() {
+  error.value = ''
+  message.value = ''
+  try {
+    const config = await request<MicrosoftOAuthConfigResponse>('/api/accounts/oauth/microsoft/config')
+    if (!config.enabled) {
+      throw new Error('微软 OAuth 未配置，请先设置 client_id 和 client_secret')
+    }
+    if (config.flow === 'legacy') {
+      const popup = window.open('/api/accounts/oauth/microsoft/start?popup=1', 'microsoft-oauth', 'popup=yes,width=640,height=760')
+      if (!popup) {
+        throw new Error('浏览器拦截了授权弹窗，请允许弹窗后重试')
+      }
+      oauthPopup = popup
+      return
+    }
+    const session = createMicrosoftOAuthSession()
+    const challenge = await createCodeChallenge(session.codeVerifier)
+    saveMicrosoftOAuthSession(session)
+    const query = new URLSearchParams({
+      client_id: config.client_id,
+      response_type: 'code',
+      redirect_uri: config.redirect_uri,
+      response_mode: 'query',
+      scope: config.scope,
+      state: session.state,
+      prompt: 'select_account',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+    })
+    const popup = window.open(
+      `https://login.microsoftonline.com/${config.tenant_id}/oauth2/v2.0/authorize?${query.toString()}`,
+      'microsoft-oauth',
+      'popup=yes,width=640,height=760',
+    )
+    if (!popup) {
+      throw new Error('浏览器拦截了授权弹窗，请允许弹窗后重试')
+    }
+    oauthPopup = popup
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '发起微软 OAuth 失败'
+  }
+}
+
+// handleOAuthMessage 只接收同源回调页发来的结果，避免无关页面干扰当前列表状态。
+async function handleOAuthMessage(event: MessageEvent<MicrosoftOAuthMessage>) {
+  if (event.origin !== window.location.origin) {
+    return
+  }
+  if (!event.data || event.data.type !== 'microsoft-oauth') {
+    return
+  }
+  if (oauthPopup && !oauthPopup.closed) {
+    oauthPopup.close()
+  }
+  oauthPopup = null
+  if (event.data.success) {
+    message.value = event.data.message
+    error.value = ''
+    await loadAccounts()
+    closeModal()
+    return
+  }
+  error.value = event.data.message
+  message.value = ''
 }
 
 // incomingHost 统一根据协议显示当前实际收信服务器，避免表格重复判断分支。
@@ -757,6 +834,7 @@ watch(
 )
 
 onMounted(async () => {
+  window.addEventListener('message', handleOAuthMessage)
   try {
     await loadProviders()
     await loadAccounts()
@@ -764,6 +842,11 @@ onMounted(async () => {
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载邮箱失败'
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('message', handleOAuthMessage)
+  oauthPopup = null
 })
 </script>
 

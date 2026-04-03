@@ -44,4 +44,25 @@ go run ./cmd/server
 - `microsoft_oauth.client_secret` / `MICROSOFT_OAUTH_CLIENT_SECRET`
 - `microsoft_oauth.redirect_url` / `MICROSOFT_OAUTH_REDIRECT_URL`
 
-默认回调地址为：`http://127.0.0.1:8080/api/accounts/oauth/microsoft/callback`
+`redirect_url` 现在支持两种模式：
+
+- 显式配置：如果配置了 `microsoft_oauth.redirect_url`，系统始终使用该值
+- 自动推导：如果未配置 `microsoft_oauth.redirect_url`，系统会按当前访问地址自动生成 `当前站点地址/oauth/microsoft/callback`
+
+兼容说明：
+
+- 如果显式配置成 `/oauth/microsoft/callback`，前端会走 PKCE 流程
+- 如果显式配置成 `/api/accounts/oauth/microsoft/callback`，系统会自动切回旧服务端回调兼容流，避免已有配置升级后立即失效
+
+示例：
+
+- 当前通过 `http://127.0.0.1:8080` 访问时，自动回调地址为 `http://127.0.0.1:8080/oauth/microsoft/callback`
+- 当前通过 `https://mail.example.com` 访问时，自动回调地址为 `https://mail.example.com/oauth/microsoft/callback`
+
+推荐做法：
+
+- 单域名直连部署时，可以不配 `redirect_url`，直接使用自动推导
+- 反向代理或公网域名部署时，确保代理正确透传 `X-Forwarded-Proto` 和 `X-Forwarded-Host`
+- 如果存在多个访问域名，或微软应用只登记了固定回调地址，建议显式配置 `redirect_url`
+
+Azure 应用注册里需要把实际使用的回调地址加入 Redirect URI 白名单。若你依赖自动推导，请把用户真实访问的域名对应的 `/oauth/microsoft/callback` 登记进去。

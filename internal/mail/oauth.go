@@ -23,6 +23,11 @@ const (
 	oauthExpirySkew         = 2 * time.Minute
 )
 
+// MicrosoftOAuthScope 返回统一维护的微软授权 scope，避免前后端各自维护时出现偏差。
+func MicrosoftOAuthScope() string {
+	return microsoftAuthorizeScope
+}
+
 type microsoftTokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -46,17 +51,29 @@ func (s *Service) MicrosoftOAuthEnabled() bool {
 
 // BuildMicrosoftOAuthURL 生成微软授权跳转地址，供前端发起 OAuth 登录。
 func (s *Service) BuildMicrosoftOAuthURL(state string) (string, error) {
+	return s.BuildMicrosoftPKCEOAuthURL(state, s.cfg.MicrosoftOAuth.RedirectURL, "")
+}
+
+// BuildMicrosoftPKCEOAuthURL 统一组装微软授权地址，兼容传统服务端回跳和前端 PKCE 流程。
+func (s *Service) BuildMicrosoftPKCEOAuthURL(state string, redirectURI string, codeChallenge string) (string, error) {
 	if !s.MicrosoftOAuthEnabled() {
 		return "", fmt.Errorf("微软 OAuth 未配置，请先设置 client_id 和 client_secret")
+	}
+	if strings.TrimSpace(redirectURI) == "" {
+		redirectURI = s.cfg.MicrosoftOAuth.RedirectURL
 	}
 	query := url.Values{}
 	query.Set("client_id", s.cfg.MicrosoftOAuth.ClientID)
 	query.Set("response_type", "code")
-	query.Set("redirect_uri", s.cfg.MicrosoftOAuth.RedirectURL)
+	query.Set("redirect_uri", redirectURI)
 	query.Set("response_mode", "query")
 	query.Set("scope", microsoftAuthorizeScope)
 	query.Set("state", state)
 	query.Set("prompt", "select_account")
+	if strings.TrimSpace(codeChallenge) != "" {
+		query.Set("code_challenge", codeChallenge)
+		query.Set("code_challenge_method", "S256")
+	}
 	return fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/authorize?%s", s.microsoftTenant(), query.Encode()), nil
 }
 
@@ -69,13 +86,25 @@ func CreateOAuthState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buffer), nil
 }
 
-// UpsertMicrosoftOAuthAccount 完成授权换码、资料获取和邮箱账户落库。
-func (s *Service) UpsertMicrosoftOAuthAccount(ctx context.Context, code string) (*model.MailAccount, error) {
-	token, err := s.exchangeMicrosoftToken(ctx, url.Values{
+// UpsertMicrosoftOAuthAccount 完成旧服务端回调流的授权换码、资料获取和邮箱账户落库。
+func (s *Service) UpsertMicrosoftOAuthAccount(ctx context.Context, code string, redirectURI string) (*model.MailAccount, error) {
+	return s.UpsertMicrosoftOAuthAccountWithPKCE(ctx, code, "", redirectURI)
+}
+
+// UpsertMicrosoftOAuthAccountWithPKCE 支持前端 PKCE 回调后带 verifier 的换码流程。
+func (s *Service) UpsertMicrosoftOAuthAccountWithPKCE(ctx context.Context, code string, codeVerifier string, redirectURI string) (*model.MailAccount, error) {
+	if strings.TrimSpace(redirectURI) == "" {
+		redirectURI = s.cfg.MicrosoftOAuth.RedirectURL
+	}
+	form := url.Values{
 		"grant_type":   []string{"authorization_code"},
 		"code":         []string{code},
-		"redirect_uri": []string{s.cfg.MicrosoftOAuth.RedirectURL},
-	})
+		"redirect_uri": []string{redirectURI},
+	}
+	if strings.TrimSpace(codeVerifier) != "" {
+		form.Set("code_verifier", codeVerifier)
+	}
+	token, err := s.exchangeMicrosoftToken(ctx, form)
 	if err != nil {
 		return nil, err
 	}
