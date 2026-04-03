@@ -65,7 +65,7 @@ func New(ctx context.Context, cfg *appcfg.Config) (*App, error) {
 		Crypto:  crypto.NewAESService(cfg.App.SecretKey),
 		closers: []func() error{sqlDB.Close},
 	}
-	app.Mailer = mail.NewService(db, app.Crypto)
+	app.Mailer = mail.NewService(db, app.Crypto, cfg)
 	app.Syncer = mail.NewSyncer(cfg, db, app.Mailer)
 	if err := app.Syncer.Start(ctx); err != nil {
 		return nil, err

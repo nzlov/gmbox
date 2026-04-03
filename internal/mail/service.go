@@ -16,6 +16,7 @@ import (
 	imapclient "github.com/emersion/go-imap/client"
 	"gorm.io/gorm"
 
+	appcfg "gmbox/internal/config"
 	"gmbox/internal/crypto"
 	"gmbox/internal/model"
 )
@@ -24,26 +25,40 @@ import (
 type Service struct {
 	db     *gorm.DB
 	crypto *crypto.AESService
+	cfg    *appcfg.Config
 }
 
 // NewService 创建邮件服务实例。
-func NewService(db *gorm.DB, cryptoSvc *crypto.AESService) *Service {
-	return &Service{db: db, crypto: cryptoSvc}
+func NewService(db *gorm.DB, cryptoSvc *crypto.AESService, cfg *appcfg.Config) *Service {
+	return &Service{db: db, crypto: cryptoSvc, cfg: cfg}
+}
+
+// WithDB 基于当前服务复制一份绑定到指定事务的实例，便于复用现有保存逻辑。
+func (s *Service) WithDB(db *gorm.DB) *Service {
+	if s == nil {
+		return nil
+	}
+	clone := *s
+	clone.db = db
+	return &clone
 }
 
 // AccountInput 描述前端提交的邮箱账户表单。
 type AccountInput struct {
+	Provider         string `json:"provider"`
+	ProviderName     string `json:"provider_name"`
+	AuthType         string `json:"auth_type"`
 	Name             string `json:"name" binding:"required"`
 	Email            string `json:"email" binding:"required,email"`
 	Username         string `json:"username" binding:"required"`
 	Password         string `json:"password"`
-	IncomingProtocol string `json:"incoming_protocol" binding:"required,oneof=imap pop3"`
+	IncomingProtocol string `json:"incoming_protocol" binding:"omitempty,oneof=imap pop3"`
 	IMAPHost         string `json:"imap_host"`
 	IMAPPort         int    `json:"imap_port"`
 	POP3Host         string `json:"pop3_host"`
 	POP3Port         int    `json:"pop3_port"`
-	SMTPHost         string `json:"smtp_host" binding:"required"`
-	SMTPPort         int    `json:"smtp_port" binding:"required"`
+	SMTPHost         string `json:"smtp_host"`
+	SMTPPort         int    `json:"smtp_port"`
 	UseTLS           bool   `json:"use_tls"`
 	Enabled          bool   `json:"enabled"`
 }
@@ -53,14 +68,48 @@ func (s *Service) SaveAccount(existing *model.MailAccount, input AccountInput) e
 	if existing == nil {
 		existing = &model.MailAccount{}
 	}
-	if existing.Model.ID == 0 && strings.TrimSpace(input.Password) == "" {
+	input = ApplyProviderPreset(input)
+	provider := normalizeProvider(input.Provider)
+	providerName := strings.TrimSpace(input.ProviderName)
+	if providerName == "" {
+		providerName = providerDisplayName(provider)
+	}
+	authType := normalizeAuthType(input.AuthType)
+	if authType == "password" && existing.Model.ID == 0 && strings.TrimSpace(input.Password) == "" {
 		return fmt.Errorf("新建邮箱时密码或授权码不能为空")
 	}
-	if existing.Model.ID > 0 && strings.TrimSpace(input.Password) == "" && strings.TrimSpace(existing.PasswordEncrypted) == "" {
+	if authType == "password" && existing.Model.ID > 0 && strings.TrimSpace(input.Password) == "" && strings.TrimSpace(existing.PasswordEncrypted) == "" {
 		return fmt.Errorf("当前邮箱缺少可用密码，请重新填写密码或授权码")
+	}
+	if authType == "oauth" && provider != "outlook" {
+		return fmt.Errorf("当前仅支持微软 OAuth")
+	}
+	if authType == "oauth" && input.IncomingProtocol != "imap" {
+		return fmt.Errorf("OAuth 邮箱当前仅支持 IMAP 协议")
+	}
+	if authType == "oauth" && strings.TrimSpace(existing.OAuthAccessToken) == "" {
+		return fmt.Errorf("请先完成微软 OAuth 授权，再保存 OAuth 邮箱")
+	}
+	if authType == "oauth" && !input.UseTLS {
+		return fmt.Errorf("OAuth 邮箱必须启用 TLS")
+	}
+	if input.IncomingProtocol != "imap" && input.IncomingProtocol != "pop3" {
+		return fmt.Errorf("收信协议仅支持 IMAP 或 POP3")
+	}
+	if strings.TrimSpace(input.SMTPHost) == "" || input.SMTPPort <= 0 {
+		return fmt.Errorf("SMTP 主机和端口不能为空")
+	}
+	if input.IncomingProtocol == "imap" && (strings.TrimSpace(input.IMAPHost) == "" || input.IMAPPort <= 0) {
+		return fmt.Errorf("IMAP 主机和端口不能为空")
+	}
+	if input.IncomingProtocol == "pop3" && (strings.TrimSpace(input.POP3Host) == "" || input.POP3Port <= 0) {
+		return fmt.Errorf("POP3 主机和端口不能为空")
 	}
 	existing.Name = input.Name
 	existing.Email = input.Email
+	existing.Provider = provider
+	existing.ProviderName = providerName
+	existing.AuthType = authType
 	existing.Username = input.Username
 	existing.IncomingProtocol = input.IncomingProtocol
 	existing.IMAPHost = input.IMAPHost
@@ -72,12 +121,15 @@ func (s *Service) SaveAccount(existing *model.MailAccount, input AccountInput) e
 	existing.UseTLS = input.UseTLS
 	existing.Enabled = input.Enabled
 
-	if strings.TrimSpace(input.Password) != "" {
+	if authType == "password" && strings.TrimSpace(input.Password) != "" {
 		ciphertext, err := s.crypto.Encrypt(input.Password)
 		if err != nil {
 			return err
 		}
 		existing.PasswordEncrypted = ciphertext
+	}
+	if authType == "oauth" {
+		existing.PasswordEncrypted = ""
 	}
 
 	if existing.Model.ID == 0 {
@@ -88,13 +140,30 @@ func (s *Service) SaveAccount(existing *model.MailAccount, input AccountInput) e
 
 // DecryptPassword 为协议拨号恢复邮箱凭证。
 func (s *Service) DecryptPassword(account model.MailAccount) (string, error) {
+	if normalizeAuthType(account.AuthType) != "password" {
+		return "", fmt.Errorf("当前邮箱使用 OAuth 认证，不支持读取密码")
+	}
 	return s.crypto.Decrypt(account.PasswordEncrypted)
+}
+
+// ResolveAuthSecret 根据认证方式返回密码或 OAuth access token，供协议层统一复用。
+func (s *Service) ResolveAuthSecret(ctx context.Context, account *model.MailAccount) (string, error) {
+	if normalizeAuthType(account.AuthType) == "oauth" {
+		return s.OAuthAccessToken(ctx, account)
+	}
+	return s.DecryptPassword(*account)
 }
 
 // TestConnection 对入站和出站地址做最小连通性验证，避免明显配置错误直接入库。
 func (s *Service) TestConnection(ctx context.Context, account model.MailAccount) error {
-	if _, err := s.DecryptPassword(account); err != nil {
-		return err
+	if normalizeAuthType(account.AuthType) == "oauth" {
+		if _, err := s.OAuthAccessToken(ctx, &account); err != nil {
+			return err
+		}
+	} else {
+		if _, err := s.DecryptPassword(account); err != nil {
+			return err
+		}
 	}
 	if account.IncomingProtocol == "imap" {
 		if err := probe(ctx, account.IMAPHost, account.IMAPPort, account.UseTLS); err != nil {
@@ -106,7 +175,7 @@ func (s *Service) TestConnection(ctx context.Context, account model.MailAccount)
 			return fmt.Errorf("POP3 连接失败: %w", err)
 		}
 	}
-	if err := probe(ctx, account.SMTPHost, account.SMTPPort, account.UseTLS); err != nil {
+	if err := probeSMTP(ctx, account); err != nil {
 		return fmt.Errorf("SMTP 连接失败: %w", err)
 	}
 	return nil
@@ -187,7 +256,7 @@ func (s *Service) SetMessageRead(ctx context.Context, messageID uint, isRead boo
 		return err
 	}
 	if account.IncomingProtocol == "imap" && message.UID > 0 {
-		password, err := s.DecryptPassword(account)
+		password, err := s.ResolveAuthSecret(ctx, &account)
 		if err != nil {
 			return err
 		}
@@ -227,7 +296,7 @@ func (s *Service) DeleteMessage(ctx context.Context, messageID uint) error {
 		message.IsDeleted = true
 		return s.db.Save(&message).Error
 	}
-	password, err := s.DecryptPassword(account)
+	password, err := s.ResolveAuthSecret(ctx, &account)
 	if err != nil {
 		return err
 	}
@@ -263,7 +332,7 @@ func (s *Service) MoveMessage(ctx context.Context, messageID uint, targetFolder 
 	if account.IncomingProtocol != "imap" || message.UID == 0 {
 		return fmt.Errorf("当前邮箱协议不支持移动邮件")
 	}
-	password, err := s.DecryptPassword(account)
+	password, err := s.ResolveAuthSecret(ctx, &account)
 	if err != nil {
 		return err
 	}

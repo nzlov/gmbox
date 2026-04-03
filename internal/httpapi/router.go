@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -75,6 +77,12 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		c.SetCookie(app.Config.Auth.CookieName, "", -1, "/", "", false, true)
 		c.JSON(http.StatusOK, gin.H{"message": "已退出登录"})
 	})
+	protected.GET("/account-providers", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"items":                   mail.ProviderPresets(),
+			"microsoft_oauth_enabled": app.Mailer.MicrosoftOAuthEnabled(),
+		})
+	})
 
 	protected.GET("/accounts", func(c *gin.Context) {
 		var accounts []model.MailAccount
@@ -97,6 +105,74 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			return
 		}
 		c.JSON(http.StatusOK, account)
+	})
+
+	protected.POST("/accounts/import", func(c *gin.Context) {
+		var req struct {
+			Items []mail.AccountInput `json:"items" binding:"required,min=1"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "导入参数不合法"})
+			return
+		}
+		accounts := make([]model.MailAccount, 0, len(req.Items))
+		if err := app.DB.Transaction(func(tx *gorm.DB) error {
+			mailer := app.Mailer.WithDB(tx)
+			for index, item := range req.Items {
+				if strings.EqualFold(strings.TrimSpace(item.AuthType), "oauth") {
+					return fmt.Errorf("第 %d 条记录使用了 OAuth，批量导入仅支持非 OAuth 邮箱", index+1)
+				}
+				account := &model.MailAccount{}
+				if err := mailer.SaveAccount(account, item); err != nil {
+					return fmt.Errorf("第 %d 条记录导入失败: %s", index+1, err.Error())
+				}
+				accounts = append(accounts, *account)
+			}
+			return nil
+		}); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": accounts, "message": fmt.Sprintf("成功导入 %d 个邮箱", len(accounts))})
+	})
+
+	protected.GET("/accounts/oauth/microsoft/start", func(c *gin.Context) {
+		state, err := mail.CreateOAuthState()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "生成 OAuth state 失败"})
+			return
+		}
+		redirectURL, err := app.Mailer.BuildMicrosoftOAuthURL(state)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.SetCookie("gmbox_oauth_state", state, 600, "/", "", false, true)
+		c.Redirect(http.StatusFound, redirectURL)
+	})
+
+	protected.GET("/accounts/oauth/microsoft/callback", func(c *gin.Context) {
+		state, err := c.Cookie("gmbox_oauth_state")
+		if err != nil || state == "" || state != c.Query("state") {
+			redirectAccounts(c, "oauth_error", "微软 OAuth state 校验失败，请重试")
+			return
+		}
+		c.SetCookie("gmbox_oauth_state", "", -1, "/", "", false, true)
+		if queryErr := strings.TrimSpace(c.Query("error")); queryErr != "" {
+			redirectAccounts(c, "oauth_error", queryErr)
+			return
+		}
+		code := strings.TrimSpace(c.Query("code"))
+		if code == "" {
+			redirectAccounts(c, "oauth_error", "微软 OAuth 未返回授权码")
+			return
+		}
+		account, err := app.Mailer.UpsertMicrosoftOAuthAccount(c.Request.Context(), code)
+		if err != nil {
+			redirectAccounts(c, "oauth_error", err.Error())
+			return
+		}
+		redirectAccounts(c, "oauth_success", fmt.Sprintf("微软 OAuth 登录成功，已接入邮箱 %s", account.Email))
 	})
 
 	protected.PUT("/accounts/:id", func(c *gin.Context) {
@@ -357,8 +433,18 @@ func loadAccount(c *gin.Context, db *gorm.DB) (*model.MailAccount, bool) {
 	}
 	var account model.MailAccount
 	if err := db.First(&account, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"message": "邮箱不存在"})
+			return nil, false
+		}
 		c.JSON(http.StatusNotFound, gin.H{"message": "邮箱不存在"})
 		return nil, false
 	}
 	return &account, true
+}
+
+// redirectAccounts 统一把 OAuth 结果带回邮箱管理页，避免前端再额外处理回调页。
+func redirectAccounts(c *gin.Context, key string, value string) {
+	query := fmt.Sprintf("/accounts?%s=%s", key, url.QueryEscape(value))
+	c.Redirect(http.StatusFound, query)
 }

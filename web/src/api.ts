@@ -2,6 +2,9 @@ export interface MailAccount {
   id: number
   name: string
   email: string
+  provider: string
+  provider_name: string
+  auth_type: 'password' | 'oauth'
   username: string
   incoming_protocol: 'imap' | 'pop3'
   imap_host: string
@@ -12,6 +15,26 @@ export interface MailAccount {
   smtp_port: number
   use_tls: boolean
   enabled: boolean
+  oauth_token_expiry?: string | null
+}
+
+export interface ProviderPreset {
+  key: string
+  name: string
+  incoming_protocol: 'imap' | 'pop3'
+  imap_host: string
+  imap_port: number
+  pop3_host: string
+  pop3_port: number
+  smtp_host: string
+  smtp_port: number
+  use_tls: boolean
+  supports_oauth: boolean
+}
+
+export interface AccountProvidersResponse {
+  items: ProviderPreset[]
+  microsoft_oauth_enabled: boolean
 }
 
 export interface MessageItem {

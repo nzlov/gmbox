@@ -17,7 +17,7 @@ import (
 
 // SyncIMAP 拉取全部可见文件夹中的新邮件并写入本地数据库。
 func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state *model.SyncState, fetchBody bool) error {
-	password, err := s.DecryptPassword(account)
+	password, err := s.ResolveAuthSecret(ctx, &account)
 	if err != nil {
 		return err
 	}
@@ -135,6 +135,13 @@ func dialIMAP(account model.MailAccount, password string) (*imapclient.Client, e
 	}
 	if err != nil {
 		return nil, fmt.Errorf("连接 IMAP 失败: %w", err)
+	}
+	if normalizeAuthType(account.AuthType) == "oauth" {
+		if err := client.Authenticate(newXOAUTH2Client(account.Username, password)); err != nil {
+			_ = client.Logout()
+			return nil, fmt.Errorf("IMAP OAuth 登录失败: %w", err)
+		}
+		return client, nil
 	}
 	if err := client.Login(account.Username, password); err != nil {
 		_ = client.Logout()

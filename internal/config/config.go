@@ -12,11 +12,12 @@ import (
 
 // Config 汇总系统运行所需的全部配置。
 type Config struct {
-	App      AppConfig      `yaml:"app"`
-	Auth     AuthConfig     `yaml:"auth"`
-	DB       DBConfig       `yaml:"db"`
-	Mail     MailConfig     `yaml:"mail"`
-	Frontend FrontendConfig `yaml:"frontend"`
+	App            AppConfig            `yaml:"app"`
+	Auth           AuthConfig           `yaml:"auth"`
+	DB             DBConfig             `yaml:"db"`
+	Mail           MailConfig           `yaml:"mail"`
+	Frontend       FrontendConfig       `yaml:"frontend"`
+	MicrosoftOAuth MicrosoftOAuthConfig `yaml:"microsoft_oauth"`
 }
 
 // AppConfig 保存应用级配置。
@@ -55,6 +56,14 @@ type MailConfig struct {
 // FrontendConfig 保存前端构建路径配置。
 type FrontendConfig struct {
 	Dist string `yaml:"dist"`
+}
+
+// MicrosoftOAuthConfig 保存微软 OAuth 接入配置。
+type MicrosoftOAuthConfig struct {
+	TenantID     string `yaml:"tenant_id"`
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	RedirectURL  string `yaml:"redirect_url"`
 }
 
 // Load 按默认值、配置文件、环境变量的顺序加载配置。
@@ -126,6 +135,10 @@ func defaults() *Config {
 		Frontend: FrontendConfig{
 			Dist: "frontend/dist",
 		},
+		MicrosoftOAuth: MicrosoftOAuthConfig{
+			TenantID:    "common",
+			RedirectURL: "http://127.0.0.1:8080/api/accounts/oauth/microsoft/callback",
+		},
 	}
 }
 
@@ -149,6 +162,10 @@ func applyEnv(cfg *Config) {
 	setBool(&cfg.Mail.FetchBody, os.Getenv("MAIL_FETCH_BODY"))
 	setInt(&cfg.Mail.PageSize, os.Getenv("MAIL_PAGE_SIZE"))
 	setString(&cfg.Frontend.Dist, os.Getenv("FRONTEND_DIST"))
+	setString(&cfg.MicrosoftOAuth.TenantID, os.Getenv("MICROSOFT_OAUTH_TENANT_ID"))
+	setString(&cfg.MicrosoftOAuth.ClientID, os.Getenv("MICROSOFT_OAUTH_CLIENT_ID"))
+	setString(&cfg.MicrosoftOAuth.ClientSecret, os.Getenv("MICROSOFT_OAUTH_CLIENT_SECRET"))
+	setString(&cfg.MicrosoftOAuth.RedirectURL, os.Getenv("MICROSOFT_OAUTH_REDIRECT_URL"))
 }
 
 // normalize 对配置做最小兜底，避免非法值把运行时拖进阻塞或崩溃状态。

@@ -16,19 +16,25 @@ type User struct {
 // MailAccount 保存外部邮箱账户连接配置。
 type MailAccount struct {
 	utilsdb.Model
-	Name              string `gorm:"size:128;not null" json:"name"`
-	Email             string `gorm:"size:255;not null;uniqueIndex" json:"email"`
-	Username          string `gorm:"size:255;not null" json:"username"`
-	PasswordEncrypted string `gorm:"type:text;not null" json:"-"`
-	IncomingProtocol  string `gorm:"size:16;not null" json:"incoming_protocol"`
-	IMAPHost          string `gorm:"size:255" json:"imap_host"`
-	IMAPPort          int    `json:"imap_port"`
-	POP3Host          string `gorm:"size:255" json:"pop3_host"`
-	POP3Port          int    `json:"pop3_port"`
-	SMTPHost          string `gorm:"size:255;not null" json:"smtp_host"`
-	SMTPPort          int    `json:"smtp_port"`
-	UseTLS            bool   `json:"use_tls"`
-	Enabled           bool   `json:"enabled"`
+	Name              string     `gorm:"size:128;not null" json:"name"`
+	Email             string     `gorm:"size:255;not null;uniqueIndex" json:"email"`
+	Provider          string     `gorm:"size:64;not null;default:custom" json:"provider"`
+	ProviderName      string     `gorm:"size:128;not null;default:自定义" json:"provider_name"`
+	AuthType          string     `gorm:"size:32;not null;default:password" json:"auth_type"`
+	Username          string     `gorm:"size:255;not null" json:"username"`
+	PasswordEncrypted string     `gorm:"type:text;not null" json:"-"`
+	OAuthAccessToken  string     `gorm:"type:text" json:"-"`
+	OAuthRefreshToken string     `gorm:"type:text" json:"-"`
+	OAuthTokenExpiry  *time.Time `json:"oauth_token_expiry"`
+	IncomingProtocol  string     `gorm:"size:16;not null" json:"incoming_protocol"`
+	IMAPHost          string     `gorm:"size:255" json:"imap_host"`
+	IMAPPort          int        `json:"imap_port"`
+	POP3Host          string     `gorm:"size:255" json:"pop3_host"`
+	POP3Port          int        `json:"pop3_port"`
+	SMTPHost          string     `gorm:"size:255;not null" json:"smtp_host"`
+	SMTPPort          int        `json:"smtp_port"`
+	UseTLS            bool       `json:"use_tls"`
+	Enabled           bool       `json:"enabled"`
 }
 
 // Mailbox 保存本地文件夹信息，便于单邮箱视图展示。

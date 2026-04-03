@@ -31,7 +31,7 @@ func (s *Service) Send(ctx context.Context, input SendInput) error {
 	if err := s.db.First(&account, input.AccountID).Error; err != nil {
 		return fmt.Errorf("读取发件邮箱失败: %w", err)
 	}
-	password, err := s.DecryptPassword(account)
+	password, err := s.ResolveAuthSecret(ctx, &account)
 	if err != nil {
 		return err
 	}
@@ -97,16 +97,7 @@ func buildSMTPMessage(account model.MailAccount, input SendInput) ([]byte, []str
 
 // sendSMTPMessage 兼容 SMTPS 和普通 SMTP/STARTTLS 两种常见服务形态。
 func sendSMTPMessage(ctx context.Context, account model.MailAccount, password string, recipients []string, raw []byte) error {
-	addr := fmt.Sprintf("%s:%d", account.SMTPHost, account.SMTPPort)
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	var conn net.Conn
-	var err error
-
-	if account.UseTLS {
-		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: account.SMTPHost, MinVersion: tls.VersionTLS12})
-	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", addr)
-	}
+	conn, err := dialSMTP(ctx, account)
 	if err != nil {
 		return fmt.Errorf("连接 SMTP 失败: %w", err)
 	}
@@ -118,16 +109,21 @@ func sendSMTPMessage(ctx context.Context, account model.MailAccount, password st
 	}
 	defer client.Quit()
 
-	if !account.UseTLS {
+	if shouldUseStartTLS(account) {
 		if ok, _ := client.Extension("STARTTLS"); ok {
 			if err := client.StartTLS(&tls.Config{ServerName: account.SMTPHost, MinVersion: tls.VersionTLS12}); err != nil {
 				return fmt.Errorf("启动 STARTTLS 失败: %w", err)
 			}
+		} else if account.UseTLS {
+			return fmt.Errorf("SMTP 服务端不支持 STARTTLS")
 		}
 	}
 
 	if ok, _ := client.Extension("AUTH"); ok {
 		auth := smtp.PlainAuth("", account.Username, password, account.SMTPHost)
+		if normalizeAuthType(account.AuthType) == "oauth" {
+			auth = newSMTPXOAUTH2Auth(account.Username, password, account.SMTPHost)
+		}
 		if err := client.Auth(auth); err != nil {
 			return fmt.Errorf("SMTP 认证失败: %w", err)
 		}
@@ -152,6 +148,52 @@ func sendSMTPMessage(ctx context.Context, account model.MailAccount, password st
 		return fmt.Errorf("提交邮件内容失败: %w", err)
 	}
 	return nil
+}
+
+// probeSMTP 以与实际发送一致的方式验证 SMTP 端口可用性，避免 587 + STARTTLS 被误判为 SMTPS。
+func probeSMTP(ctx context.Context, account model.MailAccount) error {
+	conn, err := dialSMTP(ctx, account)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	client, err := smtp.NewClient(conn, account.SMTPHost)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if shouldUseStartTLS(account) {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			return client.StartTLS(&tls.Config{ServerName: account.SMTPHost, MinVersion: tls.VersionTLS12})
+		}
+		if account.UseTLS {
+			return fmt.Errorf("SMTP 服务端不支持 STARTTLS")
+		}
+	}
+	return nil
+}
+
+// dialSMTP 根据既有配置语义选择隐式 TLS 或明文连接，统一服务于测试与发送。
+func dialSMTP(ctx context.Context, account model.MailAccount) (net.Conn, error) {
+	addr := fmt.Sprintf("%s:%d", account.SMTPHost, account.SMTPPort)
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if shouldUseImplicitSMTPTLS(account) {
+		return tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: account.SMTPHost, MinVersion: tls.VersionTLS12})
+	}
+	return dialer.DialContext(ctx, "tcp", addr)
+}
+
+// shouldUseImplicitSMTPTLS 保持历史 `use_tls=true` 的隐式 TLS 语义，仅对已知 STARTTLS 场景排除。
+func shouldUseImplicitSMTPTLS(account model.MailAccount) bool {
+	return account.UseTLS && !shouldUseStartTLS(account)
+}
+
+// shouldUseStartTLS 仅对已知需要 STARTTLS 的预设启用，避免误伤自定义隐式 TLS 端口。
+func shouldUseStartTLS(account model.MailAccount) bool {
+	if !account.UseTLS {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(account.Provider), "outlook") && account.SMTPPort == 587
 }
 
 // parseAddressList 将前端输入的邮箱字符串转换成标准地址列表。
