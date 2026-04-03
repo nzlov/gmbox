@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
@@ -277,7 +278,7 @@ func (s *Service) MoveMessage(ctx context.Context, messageID uint, targetFolder 
 	if err := client.UidMove(newUIDSet(message.UID), targetFolder); err != nil {
 		return err
 	}
-	newUID, err := findUIDInFolder(client, targetFolder, message.MessageID)
+	newUID, err := findUIDInFolder(client, targetFolder, message)
 	if err != nil {
 		return err
 	}
@@ -321,22 +322,108 @@ func attachmentBaseDir() string {
 	return filepath.Join("data", "attachments")
 }
 
-// findUIDInFolder 在移动完成后按 Message-ID 重新定位目标文件夹中的新 UID，避免后续继续使用旧 UID。
-func findUIDInFolder(client *imapclient.Client, folder string, messageID string) (uint32, error) {
-	if _, err := client.Select(folder, false); err != nil {
+// findUIDInFolder 在移动完成后优先按 Message-ID，回退按日期、主题、发件人定位目标文件夹中的新 UID。
+func findUIDInFolder(client *imapclient.Client, folder string, message model.Message) (uint32, error) {
+	mbox, err := client.Select(folder, false)
+	if err != nil {
 		return 0, err
 	}
-	if strings.TrimSpace(messageID) == "" {
-		return 0, nil
+	if strings.TrimSpace(message.MessageID) != "" {
+		criteria := imap.NewSearchCriteria()
+		criteria.Header.Add("Message-Id", message.MessageID)
+		uids, err := client.UidSearch(criteria)
+		if err != nil {
+			return 0, err
+		}
+		if len(uids) == 1 {
+			return uids[0], nil
+		}
 	}
 	criteria := imap.NewSearchCriteria()
-	criteria.Header.Add("Message-Id", messageID)
+	if !message.SentAt.IsZero() {
+		dayStart := time.Date(message.SentAt.Year(), message.SentAt.Month(), message.SentAt.Day(), 0, 0, 0, 0, message.SentAt.Location())
+		criteria.SentSince = dayStart
+		criteria.SentBefore = dayStart.Add(24 * time.Hour)
+	}
+	if strings.TrimSpace(message.Subject) != "" {
+		criteria.Header.Add("Subject", message.Subject)
+	}
+	if strings.TrimSpace(message.FromAddress) != "" {
+		criteria.Header.Add("From", message.FromAddress)
+	}
 	uids, err := client.UidSearch(criteria)
 	if err != nil {
 		return 0, err
 	}
-	if len(uids) == 0 {
+	if len(uids) == 1 {
+		return uids[0], nil
+	}
+	return fallbackFindUIDByEnvelope(client, mbox, message)
+}
+
+// fallbackFindUIDByEnvelope 抓取目标文件夹最近一批邮件的 ENVELOPE 并本地比对，兜底恢复移动后的新 UID。
+func fallbackFindUIDByEnvelope(client *imapclient.Client, mailbox *imap.MailboxStatus, message model.Message) (uint32, error) {
+	if mailbox == nil || mailbox.Messages == 0 {
 		return 0, nil
 	}
-	return uids[len(uids)-1], nil
+	from := uint32(1)
+	if mailbox.Messages > 50 {
+		from = mailbox.Messages - 49
+	}
+	seqset := new(imap.SeqSet)
+	seqset.AddRange(from, mailbox.Messages)
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope}
+	ch := make(chan *imap.Message, 20)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.Fetch(seqset, items, ch)
+	}()
+	var matched uint32
+	matchedCount := 0
+	for fetched := range ch {
+		if fetched == nil || fetched.Envelope == nil {
+			continue
+		}
+		if envelopeMatchesMessage(fetched.Envelope, message) {
+			matched = fetched.Uid
+			matchedCount++
+		}
+	}
+	if err := <-done; err != nil {
+		return 0, err
+	}
+	if matchedCount != 1 {
+		return 0, nil
+	}
+	return matched, nil
+}
+
+// envelopeMatchesMessage 使用日期、主题和发件人做近似匹配，用于 MOVE 后 UID 重定位的最后兜底。
+func envelopeMatchesMessage(envelope *imap.Envelope, message model.Message) bool {
+	if envelope == nil {
+		return false
+	}
+	if normalizeHeaderValue(envelope.Subject) != normalizeHeaderValue(message.Subject) {
+		return false
+	}
+	if !sameMailDay(envelope.Date, message.SentAt) {
+		return false
+	}
+	if len(envelope.From) == 0 {
+		return strings.TrimSpace(message.FromAddress) == ""
+	}
+	return strings.EqualFold(strings.TrimSpace(envelope.From[0].Address()), strings.TrimSpace(message.FromAddress))
+}
+
+// normalizeHeaderValue 统一收敛头字段比较格式，避免大小写和空白差异导致误判。
+func normalizeHeaderValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(textproto.TrimString(strings.Join(strings.Fields(value), " "))))
+}
+
+// sameMailDay 只比较邮件日期所在自然日，避免时区秒级差异让回退匹配失效。
+func sameMailDay(left time.Time, right time.Time) bool {
+	if left.IsZero() || right.IsZero() {
+		return false
+	}
+	return left.Year() == right.Year() && left.YearDay() == right.YearDay()
 }

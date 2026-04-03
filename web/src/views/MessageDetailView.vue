@@ -51,7 +51,8 @@
 
         <div v-if="message" :class="messageClass">{{ message }}</div>
 
-        <article class="detail-body">{{ safeBody }}</article>
+        <article v-if="sanitizedHtml" class="detail-body detail-html" v-html="sanitizedHtml"></article>
+        <article v-else class="detail-body">{{ safeBody }}</article>
 
         <section v-if="detail.attachments.length > 0" class="attachment-list">
           <h3>附件</h3>
@@ -72,6 +73,7 @@
 </template>
 
 <script setup lang="ts">
+import DOMPurify from 'dompurify'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { request, type MailboxItem, type MessageDetailResponse } from '@/api'
@@ -85,6 +87,50 @@ const message = ref('')
 const isError = ref(false)
 
 const messageClass = computed(() => (isError.value ? 'error-text' : 'success-text'))
+const sanitizedHtml = computed(() => {
+  const html = detail.value?.body?.html_body?.trim()
+  if (!html) {
+    return ''
+  }
+  const sanitized = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [
+      'a',
+      'abbr',
+      'b',
+      'blockquote',
+      'br',
+      'code',
+      'div',
+      'em',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'hr',
+      'li',
+      'ol',
+      'p',
+      'pre',
+      'span',
+      'strong',
+      'table',
+      'tbody',
+      'td',
+      'th',
+      'thead',
+      'tr',
+      'u',
+      'ul',
+    ],
+    ALLOWED_ATTR: ['alt', 'class', 'colspan', 'href', 'rowspan', 'style', 'target', 'title'],
+    ALLOW_DATA_ATTR: false,
+    FORBID_TAGS: ['form', 'iframe', 'input', 'script', 'style'],
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
+  })
+  return hardenSanitizedHtml(sanitized)
+})
 const safeBody = computed(() => {
   if (!detail.value) {
     return ''
@@ -183,6 +229,35 @@ function formatSize(size: number) {
     return `${(size / 1024).toFixed(1)} KB`
   }
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// hardenSanitizedHtml 对已经过白名单清洗的 HTML 再补一层链接安全策略。
+function hardenSanitizedHtml(html: string) {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  doc.querySelectorAll('a').forEach((anchor) => {
+    const href = anchor.getAttribute('href')?.trim() ?? ''
+    if (!href) {
+      anchor.removeAttribute('href')
+      return
+    }
+    const lowerHref = href.toLowerCase()
+    if (
+      !lowerHref.startsWith('http://') &&
+      !lowerHref.startsWith('https://') &&
+      !lowerHref.startsWith('mailto:')
+    ) {
+      anchor.removeAttribute('href')
+      return
+    }
+    anchor.setAttribute('rel', 'noopener noreferrer nofollow')
+    if (lowerHref.startsWith('http://') || lowerHref.startsWith('https://')) {
+      anchor.setAttribute('target', '_blank')
+    } else {
+      anchor.removeAttribute('target')
+    }
+  })
+  return doc.body.innerHTML
 }
 
 onMounted(loadDetail)
