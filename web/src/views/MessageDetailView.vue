@@ -37,6 +37,9 @@
           <button class="ghost-btn" @click="markRead(true)">标记已读</button>
           <button class="ghost-btn" @click="markRead(false)">标记未读</button>
           <button class="ghost-btn" @click="deleteMessage">删除</button>
+          <button class="ghost-btn" @click="toggleImages">
+            {{ showRemoteImages ? '隐藏图片' : '显示图片' }}
+          </button>
         </div>
 
         <div class="move-row">
@@ -85,6 +88,7 @@ const mailboxes = ref<MailboxItem[]>([])
 const targetFolder = ref('')
 const message = ref('')
 const isError = ref(false)
+const showRemoteImages = ref(false)
 
 const messageClass = computed(() => (isError.value ? 'error-text' : 'success-text'))
 const sanitizedHtml = computed(() => {
@@ -109,6 +113,7 @@ const sanitizedHtml = computed(() => {
       'h5',
       'h6',
       'hr',
+      ...(showRemoteImages.value ? ['img'] : []),
       'li',
       'ol',
       'p',
@@ -124,7 +129,17 @@ const sanitizedHtml = computed(() => {
       'u',
       'ul',
     ],
-    ALLOWED_ATTR: ['alt', 'class', 'colspan', 'href', 'rowspan', 'style', 'target', 'title'],
+    ALLOWED_ATTR: [
+      'alt',
+      'class',
+      'colspan',
+      'href',
+      'rowspan',
+      ...(showRemoteImages.value ? ['src'] : []),
+      'style',
+      'target',
+      'title',
+    ],
     ALLOW_DATA_ATTR: false,
     FORBID_TAGS: ['form', 'iframe', 'input', 'script', 'style'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
@@ -151,6 +166,7 @@ async function loadDetail() {
   detail.value = await request<MessageDetailResponse>(`/api/messages/${route.params.id}`)
   const accountID = detail.value.message.account_id
   mailboxes.value = await request<MailboxItem[]>(`/api/mailboxes?account_id=${accountID}`)
+  showRemoteImages.value = false
 }
 
 // markRead 切换已读状态后刷新详情，避免列表和详情状态不一致。
@@ -231,6 +247,11 @@ function formatSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// toggleImages 让远程图片只在用户显式确认后才渲染，降低追踪像素风险。
+function toggleImages() {
+  showRemoteImages.value = !showRemoteImages.value
+}
+
 // hardenSanitizedHtml 对已经过白名单清洗的 HTML 再补一层链接安全策略。
 function hardenSanitizedHtml(html: string) {
   const parser = new DOMParser()
@@ -255,6 +276,17 @@ function hardenSanitizedHtml(html: string) {
       anchor.setAttribute('target', '_blank')
     } else {
       anchor.removeAttribute('target')
+    }
+  })
+  doc.querySelectorAll('img').forEach((image) => {
+    const src = image.getAttribute('src')?.trim() ?? ''
+    if (!showRemoteImages.value || !src) {
+      image.remove()
+      return
+    }
+    const lowerSrc = src.toLowerCase()
+    if (!lowerSrc.startsWith('http://') && !lowerSrc.startsWith('https://')) {
+      image.removeAttribute('src')
     }
   })
   return doc.body.innerHTML
