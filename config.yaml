@@ -1,0 +1,27 @@
+app:
+  name: gmbox
+  env: dev
+  addr: ":8080"
+  secret_key: change-me-32-bytes-secret-key-1234
+
+auth:
+  init_username: admin
+  init_password: admin123456
+  jwt_expire: 24h
+  cookie_name: gmbox_token
+
+db:
+  driver: sqlite
+  dsn: data/gmbox.db
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 1h
+
+mail:
+  sync_cron: "*/1 * * * *"
+  max_concurrency: 5
+  fetch_body: false
+  page_size: 50
+
+frontend:
+  dist: frontend/dist
