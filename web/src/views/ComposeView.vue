@@ -67,9 +67,14 @@ const messageClass = computed(() => (isError.value ? 'error-text' : 'success-tex
 
 // loadAccounts 让写信页直接复用已有邮箱配置作为发件账户。
 async function loadAccounts() {
-  accounts.value = await request<MailAccount[]>('/api/accounts')
-  if (!form.account_id && accounts.value.length > 0) {
-    form.account_id = accounts.value[0].id
+  try {
+    accounts.value = await request<MailAccount[]>('/api/accounts')
+    if (!form.account_id && accounts.value.length > 0) {
+      form.account_id = accounts.value[0].id
+    }
+  } catch (err) {
+    isError.value = true
+    message.value = err instanceof Error ? err.message : '加载发件邮箱失败'
   }
 }
 
@@ -85,6 +90,11 @@ function splitAddresses(value: string) {
 async function submit() {
   message.value = ''
   isError.value = false
+  if (!form.account_id) {
+    isError.value = true
+    message.value = '请先选择发件邮箱'
+    return
+  }
   try {
     await request('/api/messages/send', {
       method: 'POST',

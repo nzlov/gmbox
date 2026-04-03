@@ -29,7 +29,7 @@ import { useRouter } from 'vue-router'
 import { request } from '@/api'
 
 // form 保存登录页最小表单状态，避免页面逻辑分散。
-const form = reactive({ username: 'admin', password: 'admin123456' })
+const form = reactive({ username: '', password: '' })
 const loading = ref(false)
 const error = ref('')
 const router = useRouter()

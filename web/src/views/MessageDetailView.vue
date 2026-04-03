@@ -16,7 +16,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">邮件详情</p>
-          <h1>{{ detail?.message.subject || '(无主题)' }}</h1>
+          <h1>{{ currentMessage.subject || '(无主题)' }}</h1>
         </div>
         <button class="ghost-btn" @click="router.push('/inbox')">返回列表</button>
       </header>
@@ -24,12 +24,12 @@
       <section class="panel" v-if="detail">
         <div class="detail-meta">
           <div>
-            <strong>{{ detail.message.from_name || detail.message.from_address }}</strong>
-            <p>{{ detail.message.from_address }}</p>
+            <strong>{{ currentMessage.from_name || currentMessage.from_address || '未知发件人' }}</strong>
+            <p>{{ currentMessage.from_address || '未知地址' }}</p>
           </div>
           <div class="mail-meta">
-            <span>{{ detail.message.folder }}</span>
-            <time>{{ formatDate(detail.message.sent_at) }}</time>
+            <span>{{ currentMessage.folder || '未知文件夹' }}</span>
+            <time>{{ formatDate(currentMessage.sent_at) }}</time>
           </div>
         </div>
 
@@ -57,10 +57,10 @@
         <article v-if="sanitizedHtml" class="detail-body detail-html" v-html="sanitizedHtml"></article>
         <article v-else class="detail-body">{{ safeBody }}</article>
 
-        <section v-if="detail.attachments.length > 0" class="attachment-list">
+        <section v-if="currentAttachments.length > 0" class="attachment-list">
           <h3>附件</h3>
           <button
-            v-for="attachment in detail.attachments"
+            v-for="attachment in currentAttachments"
             :key="attachment.id"
             type="button"
             class="attachment-item"
@@ -79,7 +79,7 @@
 import DOMPurify from 'dompurify'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { request, type MailboxItem, type MessageDetailResponse } from '@/api'
+import { request, type AttachmentItem, type MailboxItem, type MessageDetailResponse, type MessageItem } from '@/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -91,6 +91,23 @@ const isError = ref(false)
 const showRemoteImages = ref(false)
 
 const messageClass = computed(() => (isError.value ? 'error-text' : 'success-text'))
+const currentMessage = computed<MessageItem>(() =>
+  detail.value?.message ?? {
+    id: 0,
+    account_id: 0,
+    mailbox_id: 0,
+    folder: '',
+    subject: '',
+    from_name: '',
+    from_address: '',
+    snippet: '',
+    is_read: false,
+    is_deleted: false,
+    has_attachment: false,
+    sent_at: '',
+  },
+)
+const currentAttachments = computed<AttachmentItem[]>(() => detail.value?.attachments ?? [])
 const sanitizedHtml = computed(() => {
   const html = detail.value?.body?.html_body?.trim()
   if (!html) {
@@ -163,10 +180,19 @@ const safeBody = computed(() => {
 
 // loadDetail 获取正文和附件列表，供详情页展示和操作。
 async function loadDetail() {
-  detail.value = await request<MessageDetailResponse>(`/api/messages/${route.params.id}`)
-  const accountID = detail.value.message.account_id
-  mailboxes.value = await request<MailboxItem[]>(`/api/mailboxes?account_id=${accountID}`)
-  showRemoteImages.value = false
+  try {
+    detail.value = await request<MessageDetailResponse>(`/api/messages/${route.params.id}`)
+    const accountID = Number(detail.value?.message?.account_id ?? 0)
+    if (Number.isFinite(accountID) && accountID > 0) {
+      mailboxes.value = await request<MailboxItem[]>(`/api/mailboxes?account_id=${accountID}`)
+    } else {
+      mailboxes.value = []
+    }
+    showRemoteImages.value = false
+  } catch (err) {
+    isError.value = true
+    message.value = err instanceof Error ? err.message : '加载邮件详情失败'
+  }
 }
 
 // markRead 切换已读状态后刷新详情，避免列表和详情状态不一致。
@@ -226,7 +252,7 @@ async function downloadAttachment(id: number) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = detail.value?.attachments.find((item) => item.id === id)?.file_name ?? 'attachment'
+  link.download = currentAttachments.value.find((item) => item.id === id)?.file_name ?? 'attachment'
   link.click()
   URL.revokeObjectURL(url)
 }

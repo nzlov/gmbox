@@ -60,7 +60,7 @@ export interface MessageDetailResponse {
   attachments: AttachmentItem[]
 }
 
-// request 封装统一请求入口，确保所有页面都带上 Cookie。
+// request 封装统一请求入口，确保所有页面都带上 Cookie，并归一化后端返回的主键字段。
 export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     credentials: 'include',
@@ -76,5 +76,27 @@ export async function request<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(data.message ?? '请求失败')
   }
 
-  return response.json() as Promise<T>
+  const data = await response.json().catch(() => null)
+  return normalizePayload(data) as T
+}
+
+// normalizePayload 递归把后端返回的 `ID` 映射为前端统一使用的 `id`，避免 URL 拼出 undefined。
+function normalizePayload(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizePayload(item))
+  }
+  if (!value || typeof value !== 'object') {
+    return value
+  }
+
+  const record = value as Record<string, unknown>
+  const normalized: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(record)) {
+    normalized[key] = normalizePayload(item)
+  }
+
+  if (normalized.id == null && typeof record.ID === 'number') {
+    normalized.id = record.ID
+  }
+  return normalized
 }

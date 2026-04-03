@@ -123,6 +123,10 @@ async function submit() {
 
 // test 让用户在保存后即可验证远端服务是否可连通。
 async function test(id: number) {
+  if (!Number.isFinite(id) || id <= 0) {
+    error.value = '邮箱 ID 无效，无法测试连接'
+    return
+  }
   try {
     await request(`/api/accounts/${id}/test`, { method: 'POST' })
     error.value = '连接测试成功'
@@ -133,6 +137,10 @@ async function test(id: number) {
 
 // sync 允许用户手动触发一轮单邮箱同步，便于验证调度链路。
 async function sync(id: number) {
+  if (!Number.isFinite(id) || id <= 0) {
+    error.value = '邮箱 ID 无效，无法执行同步'
+    return
+  }
   try {
     await request(`/api/accounts/${id}/sync`, { method: 'POST' })
     error.value = '同步完成'

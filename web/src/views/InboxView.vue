@@ -93,7 +93,12 @@ const selectedFolder = ref('')
 
 // refreshAll 统一刷新邮箱、文件夹和邮件列表，避免筛选项与数据源脱节。
 async function refreshAll() {
-  await Promise.all([loadAccounts(), loadMailboxes(), loadMessages()])
+  error.value = ''
+  try {
+    await Promise.all([loadAccounts(), loadMailboxes(), loadMessages()])
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '刷新失败'
+  }
 }
 
 // loadAccounts 加载邮箱列表，供筛选器和首页统计共用。
@@ -112,7 +117,6 @@ async function loadMailboxes() {
 
 // loadMessages 根据邮箱和文件夹筛选加载邮件列表。
 async function loadMessages() {
-  error.value = ''
   try {
     const params = new URLSearchParams()
     if (selectedAccount.value) {
@@ -130,6 +134,10 @@ async function loadMessages() {
 
 // openDetail 进入详情页，以便继续查看正文和执行操作。
 async function openDetail(messageID: number) {
+  if (!Number.isFinite(messageID) || messageID <= 0) {
+    error.value = '邮件 ID 无效，无法打开详情'
+    return
+  }
   await router.push(`/messages/${messageID}`)
 }
 
