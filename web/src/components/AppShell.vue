@@ -13,29 +13,33 @@
     </q-header>
 
     <q-drawer v-model="drawerOpen" show-if-above bordered :width="260">
-      <q-list padding>
-        <q-item-label header>导航</q-item-label>
-        <q-item
-          v-for="item in navItems"
-          :key="item.key"
-          clickable
-          :to="item.to"
-          :active="item.key === active"
-          active-class="bg-primary text-white"
-          @click="drawerOpen = false"
-        >
-          <q-item-section avatar>
-            <q-icon :name="item.icon" />
-          </q-item-section>
-          <q-item-section>
-            <q-item-label>{{ item.label }}</q-item-label>
-            <q-item-label caption>{{ item.caption }}</q-item-label>
-          </q-item-section>
-        </q-item>
-      </q-list>
+      <div class="column no-wrap full-height">
+        <q-list padding>
+          <q-item-label header>导航</q-item-label>
+          <q-item
+            v-for="item in navItems"
+            :key="item.key"
+            clickable
+            :to="item.to"
+            :active="item.key === active"
+            active-class="bg-primary text-white"
+            @click="handleNavClick"
+          >
+            <q-item-section avatar>
+              <q-icon :name="item.icon" />
+            </q-item-section>
+            <q-item-section>
+              <q-item-label>{{ item.label }}</q-item-label>
+              <q-item-label caption>{{ item.caption }}</q-item-label>
+            </q-item-section>
+          </q-item>
+        </q-list>
 
-      <div class="q-pa-md">
-        <q-btn color="primary" outline class="full-width" icon="logout" label="退出登录" @click="emit('logout')" />
+        <q-space />
+
+        <div class="q-pa-md">
+          <q-btn color="primary" outline class="full-width" icon="logout" label="退出登录" @click="emit('logout')" />
+        </div>
       </div>
     </q-drawer>
 
@@ -61,6 +65,7 @@
 </template>
 
 <script setup lang="ts">
+import { useQuasar } from 'quasar'
 import { ref } from 'vue'
 
 type NavKey = 'inbox' | 'compose' | 'accounts'
@@ -76,7 +81,8 @@ const emit = defineEmits<{
   logout: []
 }>()
 
-const drawerOpen = ref(false)
+const $q = useQuasar()
+const drawerOpen = ref(true)
 
 // navItems 统一维护工作台主导航，避免多个页面各自复制菜单配置。
 const navItems: Array<{ key: NavKey; label: string; caption: string; to: string; icon: string }> = [
@@ -84,4 +90,11 @@ const navItems: Array<{ key: NavKey; label: string; caption: string; to: string;
   { key: 'compose', label: '写信', caption: '通过已接入账户发送邮件', to: '/compose', icon: 'edit_square' },
   { key: 'accounts', label: '邮箱管理', caption: '维护账户、授权与同步', to: '/accounts', icon: 'manage_accounts' },
 ]
+
+// handleNavClick 只在移动端点击导航后收起抽屉，避免桌面端切页时闪烁或消失。
+function handleNavClick() {
+  if ($q.screen.lt.md) {
+    drawerOpen.value = false
+  }
+}
 </script>
