@@ -84,55 +84,53 @@
           </q-banner>
 
           <q-form class="row q-col-gutter-md" @submit.prevent="submit">
-            <div class="col-12">
-              <q-select
-                v-model="form.provider"
-                outlined
-                dense
-                emit-value
-                map-options
-                :options="providerOptions"
-                label="服务商"
-                @update:model-value="handleProviderChange"
-              />
-            </div>
+            <q-select
+              v-model="form.provider"
+              class="col-12"
+              outlined
+              dense
+              emit-value
+              map-options
+              :options="providerOptions"
+              label="服务商"
+              @update:model-value="handleProviderChange"
+            />
 
-            <div v-if="form.provider === 'custom'" class="col-12">
-              <q-input v-model="form.provider_name" outlined dense label="自定义服务商名称" placeholder="例如：公司邮箱" />
-            </div>
+            <q-input
+              v-if="form.provider === 'custom'"
+              v-model="form.provider_name"
+              class="col-12"
+              outlined
+              dense
+              label="自定义服务商名称"
+              placeholder="例如：公司邮箱"
+            />
 
-            <div class="col-12 col-md-6">
-              <q-input v-model="form.name" outlined dense label="展示名称" />
-            </div>
-            <div class="col-12 col-md-6">
-              <q-input v-model="form.email" outlined dense label="邮箱地址" />
-            </div>
-            <div class="col-12 col-md-6">
-              <q-input v-model="form.username" outlined dense label="登录用户名" hint="默认建议填邮箱地址" />
-            </div>
-            <div class="col-12 col-md-6">
-              <q-select
-                v-model="form.auth_type"
-                outlined
-                dense
-                emit-value
-                map-options
-                :options="authOptions"
-                label="认证方式"
-                @update:model-value="handleAuthTypeChange"
-              />
-            </div>
+            <q-input v-model="form.name" class="col-12 col-md-6" outlined dense label="展示名称" />
+            <q-input v-model="form.email" class="col-12 col-md-6" outlined dense label="邮箱地址" />
+            <q-input v-model="form.username" class="col-12 col-md-6" outlined dense label="登录用户名" hint="默认建议填邮箱地址" />
+            <q-select
+              v-model="form.auth_type"
+              class="col-12 col-md-6"
+              outlined
+              dense
+              emit-value
+              map-options
+              :options="authOptions"
+              label="认证方式"
+              @update:model-value="handleAuthTypeChange"
+            />
 
-            <div v-if="form.auth_type === 'password'" class="col-12">
-              <q-input
-                v-model="form.password"
-                outlined
-                dense
-                type="password"
-                label="密码或授权码"
-                :placeholder="editingID ? '留空则保持原密码' : '密码或授权码'"
-              />
-            </div>
+            <q-input
+              v-if="form.auth_type === 'password'"
+              v-model="form.password"
+              class="col-12"
+              outlined
+              dense
+              type="password"
+              label="密码或授权码"
+              :placeholder="editingID ? '留空则保持原密码' : '密码或授权码'"
+            />
 
             <div v-else class="col-12">
               <q-banner rounded class="bg-blue-1 text-primary">
@@ -151,48 +149,31 @@
               </q-banner>
             </div>
 
-            <div class="col-12 col-md-6">
-              <q-select
-                v-model="form.incoming_protocol"
-                outlined
-                dense
-                emit-value
-                map-options
-                :options="protocolOptions"
-                label="收信协议"
-                :disable="form.auth_type === 'oauth'"
-              />
-            </div>
-            <div class="col-12 col-md-6 row items-center">
-              <q-toggle v-model="form.use_tls" color="primary" label="启用 TLS" :disable="form.auth_type === 'oauth'" />
-            </div>
+            <q-select
+              v-model="form.incoming_protocol"
+              class="col-12 col-md-6"
+              outlined
+              dense
+              emit-value
+              map-options
+              :options="protocolOptions"
+              label="收信协议"
+              :disable="form.auth_type === 'oauth'"
+            />
+            <q-toggle v-model="form.use_tls" class="col-12 col-md-6" color="primary" label="启用 TLS" :disable="form.auth_type === 'oauth'" />
 
             <template v-if="form.incoming_protocol === 'imap'">
-              <div class="col-12 col-md-6">
-                <q-input v-model="form.imap_host" outlined dense label="IMAP Host" />
-              </div>
-              <div class="col-12 col-md-6">
-                <q-input v-model.number="form.imap_port" outlined dense type="number" label="IMAP Port" />
-              </div>
+              <q-input v-model="form.imap_host" class="col-12 col-md-6" outlined dense label="IMAP Host" />
+              <q-input v-model.number="form.imap_port" class="col-12 col-md-6" outlined dense type="number" label="IMAP Port" />
             </template>
             <template v-else>
-              <div class="col-12 col-md-6">
-                <q-input v-model="form.pop3_host" outlined dense label="POP3 Host" />
-              </div>
-              <div class="col-12 col-md-6">
-                <q-input v-model.number="form.pop3_port" outlined dense type="number" label="POP3 Port" />
-              </div>
+              <q-input v-model="form.pop3_host" class="col-12 col-md-6" outlined dense label="POP3 Host" />
+              <q-input v-model.number="form.pop3_port" class="col-12 col-md-6" outlined dense type="number" label="POP3 Port" />
             </template>
 
-            <div class="col-12 col-md-6">
-              <q-input v-model="form.smtp_host" outlined dense label="SMTP Host" />
-            </div>
-            <div class="col-12 col-md-6">
-              <q-input v-model.number="form.smtp_port" outlined dense type="number" label="SMTP Port" />
-            </div>
-            <div class="col-12">
-              <q-toggle v-model="form.enabled" color="primary" label="启用账户" />
-            </div>
+            <q-input v-model="form.smtp_host" class="col-12 col-md-6" outlined dense label="SMTP Host" />
+            <q-input v-model.number="form.smtp_port" class="col-12 col-md-6" outlined dense type="number" label="SMTP Port" />
+            <q-toggle v-model="form.enabled" class="col-12" color="primary" label="启用账户" />
             <div class="col-12 row justify-end q-gutter-sm">
               <q-btn flat no-caps label="取消" @click="closeModal" />
               <q-btn color="primary" unelevated no-caps type="submit" :label="editingID ? '保存修改' : '保存邮箱'" />

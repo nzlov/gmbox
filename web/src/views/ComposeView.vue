@@ -15,24 +15,14 @@
         <q-separator />
 
         <q-card-section class="row q-col-gutter-md">
-          <div class="col-12 col-lg-8">
-            <q-select v-model="form.account_id" outlined emit-value map-options :options="accountOptions" label="发件邮箱" />
-          </div>
-          <div class="col-12 col-lg-4 row items-center">
-            <q-toggle v-model="form.is_html" color="primary" label="HTML 正文" />
-          </div>
+          <q-select v-model="form.account_id" class="col-12 col-lg-8" outlined emit-value map-options :options="accountOptions" label="发件邮箱" />
+          <q-toggle v-model="form.is_html" class="col-12 col-lg-4" color="primary" label="HTML 正文" />
         </q-card-section>
 
         <q-card-section class="row q-col-gutter-md q-pt-none">
-          <div class="col-12">
-            <q-input v-model="form.to" outlined label="收件人" hint="多个地址用英文逗号分隔" />
-          </div>
-          <div class="col-12 col-md-6">
-            <q-input v-model="form.cc" outlined label="抄送" />
-          </div>
-          <div class="col-12 col-md-6">
-            <q-input v-model="form.bcc" outlined label="密送" />
-          </div>
+          <q-input v-model="form.to" class="col-12" outlined label="收件人" hint="多个地址用英文逗号分隔" />
+          <q-input v-model="form.cc" class="col-12 col-md-6" outlined label="抄送" />
+          <q-input v-model="form.bcc" class="col-12 col-md-6" outlined label="密送" />
         </q-card-section>
 
         <q-card-section class="q-pt-none">

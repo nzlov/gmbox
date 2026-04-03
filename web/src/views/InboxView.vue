@@ -1,58 +1,55 @@
 <template>
   <q-page class="q-pa-md">
     <div class="row q-col-gutter-md">
-      <div class="col-12 col-lg-3 col-xl-3">
-        <q-card bordered class="inbox-sidebar-card">
-          <q-card-section>
-            <div class="text-subtitle1 text-weight-bold">邮箱与文件夹</div>
-          </q-card-section>
-          <q-card-section class="q-pt-none">
-            <q-select
-              v-model="selectedAccount"
-              outlined
-              dense
-              use-input
-              input-debounce="0"
-              fill-input
-              hide-selected
-              emit-value
-              map-options
-              :options="accountOptions"
-              label="筛选邮箱"
-              @filter="filterAccounts"
-              @update:model-value="handleAccountChange"
-            />
-          </q-card-section>
-          <q-list bordered separator>
-            <q-item clickable :active="selectedFolder === ''" active-class="bg-primary text-white" @click="selectFolder('')">
-              <q-item-section>
-                <q-item-label>全部文件夹</q-item-label>
-              </q-item-section>
-              <q-item-section side>
-                <q-badge color="primary" text-color="white">{{ total }}</q-badge>
-              </q-item-section>
-            </q-item>
-            <q-item
-              v-for="mailbox in mailboxes"
-              :key="mailbox.id"
-              clickable
-              :active="selectedFolder === mailbox.path"
-              active-class="bg-primary text-white"
-              @click="selectFolder(mailbox.path)"
-            >
-              <q-item-section>
-                <q-item-label>{{ mailbox.name }}</q-item-label>
-                <q-item-label caption :class="selectedFolder === mailbox.path ? 'text-white' : 'text-grey-6'">
-                  {{ mailbox.role || mailbox.path }}
-                </q-item-label>
-              </q-item-section>
-            </q-item>
-          </q-list>
-        </q-card>
-      </div>
+      <q-card bordered class="col-12 col-lg-auto inbox-sidebar-card">
+        <q-card-section>
+          <div class="text-subtitle1 text-weight-bold">邮箱与文件夹</div>
+        </q-card-section>
+        <q-card-section class="q-pt-none">
+          <q-select
+            v-model="selectedAccount"
+            outlined
+            dense
+            use-input
+            input-debounce="0"
+            fill-input
+            hide-selected
+            emit-value
+            map-options
+            :options="accountOptions"
+            label="筛选邮箱"
+            @filter="filterAccounts"
+            @update:model-value="handleAccountChange"
+          />
+        </q-card-section>
+        <q-list bordered separator>
+          <q-item clickable :active="selectedFolder === ''" active-class="bg-primary text-white" @click="selectFolder('')">
+            <q-item-section>
+              <q-item-label>全部文件夹</q-item-label>
+            </q-item-section>
+            <q-item-section side>
+              <q-badge color="primary" text-color="white">{{ total }}</q-badge>
+            </q-item-section>
+          </q-item>
+          <q-item
+            v-for="mailbox in mailboxes"
+            :key="mailbox.id"
+            clickable
+            :active="selectedFolder === mailbox.path"
+            active-class="bg-primary text-white"
+            @click="selectFolder(mailbox.path)"
+          >
+            <q-item-section>
+              <q-item-label>{{ mailbox.name }}</q-item-label>
+              <q-item-label caption :class="selectedFolder === mailbox.path ? 'text-white' : 'text-grey-6'">
+                {{ mailbox.role || mailbox.path }}
+              </q-item-label>
+            </q-item-section>
+          </q-item>
+        </q-list>
+      </q-card>
 
-      <div class="col-12 col-lg-9 col-xl-9">
-        <q-card bordered>
+      <q-card bordered class="col-12 col-lg">
           <q-card-section class="row q-col-gutter-md items-center">
             <div class="col-12 col-md-6">
               <q-input v-model.trim="keywordInput" outlined dense label="搜索主题、发件人或摘要" @keyup.enter="applyKeywordNow">
@@ -118,8 +115,7 @@
               <q-btn outline color="primary" no-caps :disable="page >= totalPages" label="下一页" @click="loadMessages(page + 1)" />
             </div>
           </q-card-section>
-        </q-card>
-      </div>
+      </q-card>
     </div>
 
     <q-page-sticky position="bottom-right" :offset="[24, 24]">
@@ -309,7 +305,8 @@ onMounted(refreshAll)
 
 <style scoped>
 .inbox-sidebar-card {
-  max-width: 320px;
+  width: 300px;
+  max-width: 100%;
 }
 
 @media (max-width: 1023px) {
