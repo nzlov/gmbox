@@ -7,8 +7,17 @@
     @logout="logout"
   >
     <template #hero-actions>
-      <q-btn outline color="primary" no-caps icon="upload_file" label="批量导入" @click="openImportModal" />
-      <q-btn color="primary" unelevated no-caps icon="add" label="添加邮箱" @click="openCreateModal" />
+      <q-fab color="primary" icon="add" direction="down" vertical-actions-align="right">
+        <q-tooltip>添加操作</q-tooltip>
+
+        <q-fab-action color="primary" icon="person_add" label="添加邮箱" label-position="left" @click="openCreateModal">
+          <q-tooltip>添加邮箱</q-tooltip>
+        </q-fab-action>
+
+        <q-fab-action color="secondary" icon="upload_file" label="批量导入" label-position="left" @click="openImportModal">
+          <q-tooltip>批量导入</q-tooltip>
+        </q-fab-action>
+      </q-fab>
     </template>
 
     <q-card bordered>
@@ -31,14 +40,10 @@
       >
         <template #top>
           <div class="full-width row q-col-gutter-md items-center">
-            <div class="col-12 col-xl">
-              <div class="text-subtitle1 text-weight-bold">邮箱列表</div>
-              <div class="text-body2 text-grey-7 q-mt-xs">支持服务商自动配置、微软 OAuth 和非 OAuth 批量导入。</div>
-            </div>
-            <div class="col-12 col-xl-4">
+            <div class="col-12 col-xl-5">
               <q-input v-model.trim="tableFilter" outlined dense clearable label="搜索名称、邮箱或服务商" />
             </div>
-            <div class="col-12 row q-gutter-sm wrap justify-end">
+            <div class="col-12 col-xl row q-gutter-sm wrap justify-end">
               <q-btn outline color="primary" no-caps :disable="!hasSelection" label="启用" @click="batchUpdateEnabled(true)" />
               <q-btn outline color="primary" no-caps :disable="!hasSelection" label="禁用" @click="batchUpdateEnabled(false)" />
               <q-btn outline color="secondary" no-caps :disable="!hasSelection" label="同步" @click="batchSync" />
