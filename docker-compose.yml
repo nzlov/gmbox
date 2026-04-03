@@ -1,16 +1,18 @@
 services:
   gmbox:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8080:8080"
     environment:
+      ALL_PROXY: "http://100.64.0.7:9110"
+      NO_PROXY: localhost,127.0.0.1,100.64.0.7
       APP_ADDR: ":8080"
       APP_SECRET_KEY: "change-me-32-bytes-secret-key-1234"
       DB_DRIVER: "sqlite"
       DB_DSN: "data/gmbox.db"
       MAIL_SYNC_CRON: "*/1 * * * *"
     volumes:
-      - ../data:/app/data
-      - ../config.yaml:/app/config.yaml
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml
