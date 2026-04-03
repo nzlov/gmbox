@@ -46,7 +46,7 @@
     <q-page-container>
       <q-page class="q-pa-md">
         <q-card flat bordered class="q-mb-md">
-          <q-card-section class="row items-start justify-between q-col-gutter-md">
+          <q-card-section v-if="!hideHero" class="row items-start justify-between q-col-gutter-md">
             <div class="col-12 col-md">
               <div class="text-overline text-primary">{{ eyebrow || '工作台' }}</div>
               <div class="text-h5 text-weight-bold q-mt-xs">{{ title }}</div>
@@ -75,6 +75,7 @@ defineProps<{
   eyebrow?: string
   subtitle?: string
   active: NavKey
+  hideHero?: boolean
 }>()
 
 const emit = defineEmits<{

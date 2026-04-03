@@ -4,83 +4,64 @@
     eyebrow="SMTP 发信"
     title="写信"
     subtitle="复用已保存的邮箱配置直接发信，把常用字段、抄送和 HTML 正文开关集中到同一编辑面板。"
+    :hide-hero="true"
     @logout="logout"
   >
-    <div class="row q-col-gutter-md">
-      <div class="col-12 col-xl-8">
-        <q-card bordered>
-          <q-card-section>
-            <div class="text-subtitle1 text-weight-bold">邮件内容</div>
-            <div class="text-body2 text-grey-7 q-mt-xs">发件账户来自邮箱管理页，地址输入支持英文逗号分隔。</div>
-          </q-card-section>
+    <q-form @submit.prevent="submit">
+      <q-card bordered>
+        <q-card-section>
+          <div class="text-h6 text-weight-bold">邮件内容</div>
+          <div class="text-body2 text-grey-7 q-mt-xs">发件账户来自邮箱管理页，地址输入支持英文逗号分隔。</div>
+        </q-card-section>
 
-          <q-card-section class="q-pt-none">
-            <q-form class="column q-gutter-md" @submit.prevent="submit">
-              <q-select v-model="form.account_id" outlined dense emit-value map-options :options="accountOptions" label="发件邮箱" />
-              <q-input v-model="form.to" outlined dense label="收件人" hint="多个地址用英文逗号分隔" />
-              <div class="row q-col-gutter-md">
-                <div class="col-12 col-md-6">
-                  <q-input v-model="form.cc" outlined dense label="抄送" />
-                </div>
-                <div class="col-12 col-md-6">
-                  <q-input v-model="form.bcc" outlined dense label="密送" />
-                </div>
-              </div>
-              <q-input v-model="form.subject" outlined dense label="主题" />
-              <q-toggle v-model="form.is_html" color="primary" label="HTML 正文" />
-              <q-input v-model="form.body" outlined autogrow type="textarea" label="正文" />
-              <div class="row q-gutter-sm justify-end">
-                <q-btn color="primary" unelevated no-caps icon="send" label="发送邮件" type="submit" />
-              </div>
-            </q-form>
-          </q-card-section>
-        </q-card>
-      </div>
+        <q-card-section v-if="message" class="q-pt-none">
+          <q-banner rounded :class="isError ? 'bg-red-1 text-negative' : 'bg-green-1 text-positive'">
+            {{ message }}
+          </q-banner>
+        </q-card-section>
 
-      <div class="col-12 col-xl-4">
-        <q-card bordered>
-          <q-card-section>
-            <div class="text-subtitle1 text-weight-bold">发送说明</div>
-            <div class="text-body2 text-grey-7 q-mt-xs">减少发信时遗漏配置的概率。</div>
-          </q-card-section>
-          <q-list bordered separator>
-            <q-item>
-              <q-item-section avatar>
-                <q-icon name="settings" color="primary" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>发件账户来自已保存邮箱</q-item-label>
-                <q-item-label caption>无需重复录入 SMTP 主机与端口，直接复用账户配置。</q-item-label>
-              </q-item-section>
-            </q-item>
-            <q-item>
-              <q-item-section avatar>
-                <q-icon name="verified_user" color="secondary" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>优先使用授权码</q-item-label>
-                <q-item-label caption>如果服务商要求授权码，应在邮箱管理页保存授权码而不是登录密码。</q-item-label>
-              </q-item-section>
-            </q-item>
-            <q-item>
-              <q-item-section avatar>
-                <q-icon name="code" color="accent" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>HTML 开关独立控制</q-item-label>
-                <q-item-label caption>仅在确实需要富文本结构时开启，降低无关样式干扰。</q-item-label>
-              </q-item-section>
-            </q-item>
-          </q-list>
+        <q-separator />
 
-          <q-card-section v-if="message">
-            <q-banner rounded :class="isError ? 'bg-red-1 text-negative' : 'bg-green-1 text-positive'">
-              {{ message }}
-            </q-banner>
-          </q-card-section>
-        </q-card>
-      </div>
-    </div>
+        <q-card-section class="row q-col-gutter-md">
+          <div class="col-12 col-lg-8">
+            <q-select v-model="form.account_id" outlined emit-value map-options :options="accountOptions" label="发件邮箱" />
+          </div>
+          <div class="col-12 col-lg-4 row items-center">
+            <q-toggle v-model="form.is_html" color="primary" label="HTML 正文" />
+          </div>
+        </q-card-section>
+
+        <q-card-section class="row q-col-gutter-md q-pt-none">
+          <div class="col-12">
+            <q-input v-model="form.to" outlined label="收件人" hint="多个地址用英文逗号分隔" />
+          </div>
+          <div class="col-12 col-md-6">
+            <q-input v-model="form.cc" outlined label="抄送" />
+          </div>
+          <div class="col-12 col-md-6">
+            <q-input v-model="form.bcc" outlined label="密送" />
+          </div>
+        </q-card-section>
+
+        <q-card-section class="q-pt-none">
+          <q-input v-model="form.subject" outlined label="主题" />
+        </q-card-section>
+
+        <q-card-section class="q-pt-none">
+          <q-input v-model="form.body" outlined autogrow type="textarea" label="正文" input-style="min-height: 320px" />
+        </q-card-section>
+      </q-card>
+
+      <q-page-sticky position="bottom-right" :offset="[24, 24]">
+        <q-fab color="primary" icon="send" direction="up" vertical-actions-align="right">
+          <q-tooltip>发送操作</q-tooltip>
+
+          <q-fab-action color="primary" icon="send" label="发送邮件" label-position="left" @click="submit">
+            <q-tooltip>发送邮件</q-tooltip>
+          </q-fab-action>
+        </q-fab>
+      </q-page-sticky>
+    </q-form>
   </AppShell>
 </template>
 

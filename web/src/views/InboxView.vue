@@ -11,7 +11,13 @@
     </template>
 
     <template #hero-actions>
-      <q-btn color="primary" unelevated no-caps icon="refresh" label="刷新列表" @click="refreshAll" />
+      <q-fab color="primary" icon="refresh" direction="down" vertical-actions-align="right">
+        <q-tooltip>刷新操作</q-tooltip>
+
+        <q-fab-action color="primary" icon="refresh" label="刷新列表" label-position="left" @click="refreshAll">
+          <q-tooltip>刷新列表</q-tooltip>
+        </q-fab-action>
+      </q-fab>
     </template>
 
     <div class="row q-col-gutter-md">
@@ -26,10 +32,15 @@
               v-model="selectedAccount"
               outlined
               dense
+              use-input
+              input-debounce="0"
+              fill-input
+              hide-selected
               emit-value
               map-options
               :options="accountOptions"
               label="筛选邮箱"
+              @filter="filterAccounts"
               @update:model-value="handleAccountChange"
             />
           </q-card-section>
@@ -65,18 +76,14 @@
       <div class="col-12 col-lg-8 col-xl-9">
         <q-card bordered>
           <q-card-section class="row q-col-gutter-md items-center">
-            <div class="col-12 col-md">
-              <div class="text-subtitle1 text-weight-bold">邮件列表</div>
-              <div class="text-body2 text-grey-7 q-mt-xs">按时间倒序展示，支持关键词搜索与分页切换。</div>
-            </div>
-            <div class="col-12 col-md-5">
+            <div class="col-12 col-md-6">
               <q-input v-model.trim="keywordInput" outlined dense label="搜索主题、发件人或摘要" @keyup.enter="applyKeywordNow">
                 <template #append>
                   <q-btn v-if="keywordInput" flat round dense icon="close" @click="clearKeyword" />
                 </template>
               </q-input>
             </div>
-            <div class="col-12 col-md-auto row q-gutter-sm justify-end">
+            <div class="col-12 col-md row q-gutter-sm justify-end">
               <q-select
                 v-model="pageSize"
                 outlined
@@ -153,6 +160,7 @@ const messages = ref<MessageItem[]>([])
 const error = ref('')
 const selectedAccount = ref('')
 const selectedFolder = ref('')
+const accountFilter = ref('')
 const keyword = ref('')
 const keywordInput = ref('')
 const page = ref(1)
@@ -163,7 +171,15 @@ let keywordTimer: ReturnType<typeof setTimeout> | null = null
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const accountOptions = computed(() => [
   { label: '全部邮箱', value: '' },
-  ...accounts.value.map((account) => ({ label: `${account.name} / ${account.email}`, value: String(account.id) })),
+  ...accounts.value
+    .filter((account) => {
+      if (!accountFilter.value.trim()) {
+        return true
+      }
+      const keyword = accountFilter.value.trim().toLowerCase()
+      return `${account.name} ${account.email}`.toLowerCase().includes(keyword)
+    })
+    .map((account) => ({ label: `${account.name} / ${account.email}`, value: String(account.id) })),
 ])
 const pageSizeOptions = [
   { label: '10 条/页', value: 10 },
@@ -239,6 +255,13 @@ function selectFolder(folder: string) {
 // handlePageSizeChange 切换分页大小后强制回到第一页，避免页码越界。
 function handlePageSizeChange() {
   void loadMessages(1)
+}
+
+// filterAccounts 允许在邮箱筛选下拉中按名称或地址输入搜索，减少账号较多时的滚动查找成本。
+function filterAccounts(value: string, update: (callbackFn: () => void) => void) {
+  update(() => {
+    accountFilter.value = value
+  })
 }
 
 // applyKeywordNow 在用户主动确认时立即应用搜索词，避免回车仍等待防抖延迟。
