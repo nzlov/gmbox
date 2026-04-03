@@ -1,17 +1,9 @@
 <template>
-  <AppShell
-    active="compose"
-    eyebrow="SMTP 发信"
-    title="写信"
-    subtitle="复用已保存的邮箱配置直接发信，把常用字段、抄送和 HTML 正文开关集中到同一编辑面板。"
-    :hide-hero="true"
-    @logout="logout"
-  >
+  <q-page class="q-pa-md">
     <q-form @submit.prevent="submit">
       <q-card bordered>
         <q-card-section>
           <div class="text-h6 text-weight-bold">邮件内容</div>
-          <div class="text-body2 text-grey-7 q-mt-xs">发件账户来自邮箱管理页，地址输入支持英文逗号分隔。</div>
         </q-card-section>
 
         <q-card-section v-if="message" class="q-pt-none">
@@ -55,23 +47,19 @@
       <q-page-sticky position="bottom-right" :offset="[24, 24]">
         <q-fab color="primary" icon="send" direction="up" vertical-actions-align="right">
           <q-tooltip>发送操作</q-tooltip>
-
           <q-fab-action color="primary" icon="send" label="发送邮件" label-position="left" @click="submit">
             <q-tooltip>发送邮件</q-tooltip>
           </q-fab-action>
         </q-fab>
       </q-page-sticky>
     </q-form>
-  </AppShell>
+  </q-page>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { request, type MailAccount } from '@/api'
-import AppShell from '@/components/AppShell.vue'
 
-const router = useRouter()
 const accounts = ref<MailAccount[]>([])
 const message = ref('')
 const isError = ref(false)
@@ -139,12 +127,6 @@ async function submit() {
     isError.value = true
     message.value = err instanceof Error ? err.message : '发送失败'
   }
-}
-
-// logout 通过后端清理登录态，确保跳回登录页后状态一致。
-async function logout() {
-  await request('/api/auth/logout', { method: 'POST' })
-  await router.push('/login')
 }
 
 onMounted(loadAccounts)

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import MainLayout from '@/layouts/MainLayout.vue'
 import LoginView from '@/views/LoginView.vue'
 import InboxView from '@/views/InboxView.vue'
 import AccountsView from '@/views/AccountsView.vue'
@@ -12,11 +13,18 @@ const router = createRouter({
   routes: [
     { path: '/login', component: LoginView },
     { path: '/oauth/microsoft/callback', component: MicrosoftOAuthCallbackView },
-    { path: '/', redirect: '/inbox' },
-    { path: '/inbox', component: InboxView, meta: { auth: true } },
-    { path: '/accounts', component: AccountsView, meta: { auth: true } },
-    { path: '/compose', component: ComposeView, meta: { auth: true } },
-    { path: '/messages/:id', component: MessageDetailView, meta: { auth: true } },
+    {
+      path: '/',
+      component: MainLayout,
+      meta: { auth: true },
+      children: [
+        { path: '', redirect: '/inbox' },
+        { path: 'inbox', component: InboxView },
+        { path: 'accounts', component: AccountsView },
+        { path: 'compose', component: ComposeView },
+        { path: 'messages/:id', component: MessageDetailView },
+      ],
+    },
   ],
 })
 

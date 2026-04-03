@@ -1,20 +1,14 @@
 <template>
-  <AppShell
-    active="inbox"
-    eyebrow="邮件详情"
-    :title="currentMessage.subject || '(无主题)'"
-    subtitle="详情页支持已读、删除、移动与远程图片开关，同时维持正文安全清洗策略。"
-    @logout="logout"
-  >
-    <template #hero-actions>
+  <q-page class="q-pa-md">
+    <div class="row justify-end q-mb-md">
       <q-btn outline color="primary" no-caps icon="arrow_back" label="返回列表" @click="router.push('/inbox')" />
-    </template>
+    </div>
 
     <q-card v-if="detail" bordered>
       <q-card-section class="row q-col-gutter-lg items-start">
         <div class="col-12 col-lg">
-          <div class="text-h6 text-weight-bold">{{ currentMessage.from_name || currentMessage.from_address || '未知发件人' }}</div>
-          <div class="text-body2 text-grey-7 q-mt-xs">{{ currentMessage.from_address || '未知地址' }}</div>
+          <div class="text-h6 text-weight-bold">{{ currentMessage.subject || '(无主题)' }}</div>
+          <div class="text-body2 text-grey-7 q-mt-xs">{{ currentMessage.from_name || currentMessage.from_address || '未知发件人' }}</div>
           <div class="row q-gutter-sm q-mt-md">
             <q-badge color="grey-3" text-color="dark">{{ currentMessage.folder || '未知文件夹' }}</q-badge>
             <q-badge v-if="currentMessage.has_attachment" color="grey-3" text-color="dark">含附件</q-badge>
@@ -85,7 +79,7 @@
     <q-banner v-else-if="message" rounded class="bg-red-1 text-negative">
       {{ message }}
     </q-banner>
-  </AppShell>
+  </q-page>
 </template>
 
 <script setup lang="ts">
@@ -93,7 +87,6 @@ import DOMPurify from 'dompurify'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { request, type AttachmentItem, type MailboxItem, type MessageDetailResponse, type MessageItem } from '@/api'
-import AppShell from '@/components/AppShell.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -256,12 +249,6 @@ function formatSize(size: number) {
 // toggleImages 让远程图片只在用户显式确认后才渲染，降低追踪像素风险。
 function toggleImages() {
   showRemoteImages.value = !showRemoteImages.value
-}
-
-// logout 通过后端销毁 Cookie，避免详情页返回后仍保留旧登录态。
-async function logout() {
-  await request('/api/auth/logout', { method: 'POST' })
-  await router.push('/login')
 }
 
 // hardenSanitizedHtml 对已经过白名单清洗的 HTML 再补一层链接安全策略。

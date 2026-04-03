@@ -1,31 +1,10 @@
 <template>
-  <AppShell
-    active="inbox"
-    eyebrow="聚合视图"
-    title="聚合信息"
-    subtitle="按账户、文件夹与关键词交叉筛选邮件，保持多邮箱处理链路集中在一个页面。"
-    @logout="logout"
-  >
-    <template #actions>
-      <q-btn flat round dense icon="refresh" @click="refreshAll" />
-    </template>
-
-    <template #hero-actions>
-      <q-fab color="primary" icon="refresh" direction="down" vertical-actions-align="right">
-        <q-tooltip>刷新操作</q-tooltip>
-
-        <q-fab-action color="primary" icon="refresh" label="刷新列表" label-position="left" @click="refreshAll">
-          <q-tooltip>刷新列表</q-tooltip>
-        </q-fab-action>
-      </q-fab>
-    </template>
-
+  <q-page class="q-pa-md">
     <div class="row q-col-gutter-md">
-      <div class="col-12 col-lg-4 col-xl-3">
-        <q-card bordered>
+      <div class="col-12 col-lg-3 col-xl-3">
+        <q-card bordered class="inbox-sidebar-card">
           <q-card-section>
             <div class="text-subtitle1 text-weight-bold">邮箱与文件夹</div>
-            <div class="text-body2 text-grey-7 q-mt-xs">切换账户后会联动刷新文件夹与邮件列表。</div>
           </q-card-section>
           <q-card-section class="q-pt-none">
             <q-select
@@ -48,7 +27,6 @@
             <q-item clickable :active="selectedFolder === ''" active-class="bg-primary text-white" @click="selectFolder('')">
               <q-item-section>
                 <q-item-label>全部文件夹</q-item-label>
-                <q-item-label caption :class="selectedFolder === '' ? 'text-white' : 'text-grey-6'">显示当前筛选下的所有邮件</q-item-label>
               </q-item-section>
               <q-item-section side>
                 <q-badge color="primary" text-color="white">{{ total }}</q-badge>
@@ -73,7 +51,7 @@
         </q-card>
       </div>
 
-      <div class="col-12 col-lg-8 col-xl-9">
+      <div class="col-12 col-lg-9 col-xl-9">
         <q-card bordered>
           <q-card-section class="row q-col-gutter-md items-center">
             <div class="col-12 col-md-6">
@@ -128,7 +106,6 @@
             <div v-else class="column items-center justify-center text-center q-py-xl text-grey-7">
               <q-icon name="inbox" size="56px" color="grey-5" />
               <div class="text-subtitle1 q-mt-md">暂无匹配邮件</div>
-              <div class="text-body2 q-mt-xs">可以调整账户、文件夹或搜索词后重试。</div>
             </div>
           </q-card-section>
 
@@ -144,15 +121,22 @@
         </q-card>
       </div>
     </div>
-  </AppShell>
+
+    <q-page-sticky position="bottom-right" :offset="[24, 24]">
+      <q-fab color="primary" icon="refresh" direction="up" vertical-actions-align="right">
+        <q-tooltip>刷新操作</q-tooltip>
+        <q-fab-action color="primary" icon="refresh" label="刷新列表" label-position="left" @click="refreshAll">
+          <q-tooltip>刷新列表</q-tooltip>
+        </q-fab-action>
+      </q-fab>
+    </q-page-sticky>
+  </q-page>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { request, type MailAccount, type MailboxItem, type MessageItem, type MessageListResponse } from '@/api'
-import AppShell from '@/components/AppShell.vue'
-
 const router = useRouter()
 const accounts = ref<MailAccount[]>([])
 const mailboxes = ref<MailboxItem[]>([])
@@ -305,12 +289,6 @@ async function openDetail(messageID: number) {
   await router.push(`/messages/${messageID}`)
 }
 
-// logout 通过后端清理 Cookie，避免前端误判登录状态。
-async function logout() {
-  await request('/api/auth/logout', { method: 'POST' })
-  await router.push('/login')
-}
-
 // formatDate 统一处理时间显示，避免不同浏览器直接输出格式不一致。
 function formatDate(value: string) {
   if (!value) {
@@ -328,3 +306,15 @@ onBeforeUnmount(() => {
 
 onMounted(refreshAll)
 </script>
+
+<style scoped>
+.inbox-sidebar-card {
+  max-width: 320px;
+}
+
+@media (max-width: 1023px) {
+  .inbox-sidebar-card {
+    max-width: none;
+  }
+}
+</style>

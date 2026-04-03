@@ -1,25 +1,5 @@
 <template>
-  <AppShell
-    active="accounts"
-    eyebrow="多邮箱管理"
-    title="邮箱账户"
-    subtitle="集中维护服务商预设、微软 OAuth、批量导入与单账户操作，把多邮箱接入面板收敛到统一工作流。"
-    @logout="logout"
-  >
-    <template #hero-actions>
-      <q-fab color="primary" icon="add" direction="down" vertical-actions-align="right">
-        <q-tooltip>添加操作</q-tooltip>
-
-        <q-fab-action color="primary" icon="person_add" label="添加邮箱" label-position="left" @click="openCreateModal">
-          <q-tooltip>添加邮箱</q-tooltip>
-        </q-fab-action>
-
-        <q-fab-action color="secondary" icon="upload_file" label="批量导入" label-position="left" @click="openImportModal">
-          <q-tooltip>批量导入</q-tooltip>
-        </q-fab-action>
-      </q-fab>
-    </template>
-
+  <q-page class="q-pa-md">
     <q-card bordered>
       <q-card-section v-if="(message || error) && !showModal && !showImportModal" class="q-pt-none">
         <q-banner v-if="message" rounded class="bg-green-1 text-positive q-mb-sm">{{ message }}</q-banner>
@@ -266,7 +246,21 @@
         </q-card-section>
       </q-card>
     </q-dialog>
-  </AppShell>
+
+    <q-page-sticky position="bottom-right" :offset="[24, 24]">
+      <q-fab color="primary" icon="add" direction="up" vertical-actions-align="right">
+        <q-tooltip>添加操作</q-tooltip>
+
+        <q-fab-action color="primary" icon="person_add" label="添加邮箱" label-position="left" @click="openCreateModal">
+          <q-tooltip>添加邮箱</q-tooltip>
+        </q-fab-action>
+
+        <q-fab-action color="secondary" icon="upload_file" label="批量导入" label-position="left" @click="openImportModal">
+          <q-tooltip>批量导入</q-tooltip>
+        </q-fab-action>
+      </q-fab>
+    </q-page-sticky>
+  </q-page>
 </template>
 
 <script setup lang="ts">
@@ -279,7 +273,6 @@ import {
   type MicrosoftOAuthConfigResponse,
   type ProviderPreset,
 } from '@/api'
-import AppShell from '@/components/AppShell.vue'
 import { createCodeChallenge, createMicrosoftOAuthSession, saveMicrosoftOAuthSession } from '@/utils/oauth'
 
 type MicrosoftOAuthMessage = {
@@ -844,12 +837,6 @@ async function handleOAuthFeedback() {
   message.value = success
   error.value = failure
   await router.replace({ path: '/accounts' })
-}
-
-// logout 统一清理登录态，保持所有业务页退出行为一致。
-async function logout() {
-  await request('/api/auth/logout', { method: 'POST' })
-  await router.push('/login')
 }
 
 watch(
