@@ -1,56 +1,102 @@
 <template>
-  <div class="page-shell">
-    <aside class="sidebar">
-      <div>
-        <div class="brand-pill">G</div>
-        <h2>gmbox</h2>
+  <AppShell
+    active="compose"
+    eyebrow="SMTP 发信"
+    title="写信"
+    subtitle="复用已保存的邮箱配置直接发信，把常用字段、抄送和 HTML 正文开关集中到同一编辑面板。"
+    @logout="logout"
+  >
+    <div class="row q-col-gutter-lg">
+      <div class="col-12 col-xl-8">
+        <q-card flat class="app-glass-card">
+          <q-card-section>
+            <div class="section-title">邮件内容</div>
+            <div class="section-subtitle q-mt-xs">发件账户来自邮箱管理页，地址输入支持英文逗号分隔。</div>
+          </q-card-section>
+
+          <q-card-section class="q-pt-none">
+            <q-form class="column q-gutter-md" @submit.prevent="submit">
+              <q-select
+                v-model="form.account_id"
+                outlined
+                dense
+                emit-value
+                map-options
+                :options="accountOptions"
+                label="发件邮箱"
+              />
+              <q-input v-model="form.to" outlined dense label="收件人" hint="多个地址用英文逗号分隔" />
+              <div class="row q-col-gutter-md">
+                <div class="col-12 col-md-6">
+                  <q-input v-model="form.cc" outlined dense label="抄送" />
+                </div>
+                <div class="col-12 col-md-6">
+                  <q-input v-model="form.bcc" outlined dense label="密送" />
+                </div>
+              </div>
+              <q-input v-model="form.subject" outlined dense label="主题" />
+              <q-toggle v-model="form.is_html" color="primary" label="HTML 正文" />
+              <q-input v-model="form.body" outlined autogrow type="textarea" label="正文" />
+              <div class="row q-gutter-sm justify-end">
+                <q-btn color="primary" unelevated no-caps icon="send" label="发送邮件" type="submit" />
+              </div>
+            </q-form>
+          </q-card-section>
+        </q-card>
       </div>
-      <nav class="nav-links">
-        <RouterLink to="/inbox">聚合信息</RouterLink>
-        <RouterLink to="/compose">写信</RouterLink>
-        <RouterLink to="/accounts">邮箱管理</RouterLink>
-      </nav>
-      <button class="ghost-btn sidebar-logout" @click="logout">退出登录</button>
-    </aside>
 
-    <main class="content-shell">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">SMTP 发信</p>
-          <h1>写信</h1>
-        </div>
-      </header>
+      <div class="col-12 col-xl-4">
+        <q-card flat class="app-glass-card full-height">
+          <q-card-section>
+            <div class="section-title">发送说明</div>
+            <div class="section-subtitle q-mt-xs">减少发信时遗漏配置的概率。</div>
+          </q-card-section>
+          <q-list separator>
+            <q-item>
+              <q-item-section avatar>
+                <q-icon name="settings" color="primary" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>发件账户来自已保存邮箱</q-item-label>
+                <q-item-label caption>无需重复录入 SMTP 主机与端口，直接复用账户配置。</q-item-label>
+              </q-item-section>
+            </q-item>
+            <q-item>
+              <q-item-section avatar>
+                <q-icon name="verified_user" color="secondary" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>优先使用授权码</q-item-label>
+                <q-item-label caption>如果服务商要求授权码，应在邮箱管理页保存授权码而不是登录密码。</q-item-label>
+              </q-item-section>
+            </q-item>
+            <q-item>
+              <q-item-section avatar>
+                <q-icon name="code" color="accent" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>HTML 开关独立控制</q-item-label>
+                <q-item-label caption>仅在确实需要富文本结构时开启，降低无关样式干扰。</q-item-label>
+              </q-item-section>
+            </q-item>
+          </q-list>
 
-      <section class="panel account-layout">
-        <form class="form-grid" @submit.prevent="submit">
-          <select v-model.number="form.account_id">
-            <option :value="0">选择发件邮箱</option>
-            <option v-for="item in accounts" :key="item.id" :value="item.id">{{ item.name }} / {{ item.email }}</option>
-          </select>
-          <input v-model="form.to" placeholder="收件人，多个用逗号分隔" />
-          <input v-model="form.cc" placeholder="抄送，可选" />
-          <input v-model="form.bcc" placeholder="密送，可选" />
-          <input v-model="form.subject" placeholder="主题" />
-          <label class="switch-row"><span>HTML 正文</span><input v-model="form.is_html" type="checkbox" /></label>
-          <textarea v-model="form.body" class="compose-area" placeholder="输入邮件正文"></textarea>
-          <button class="primary-btn">发送邮件</button>
-        </form>
-
-        <div class="panel compose-tips">
-          <h3>使用说明</h3>
-          <p>当前版本已打通 SMTP 发信接口，发信账户来自已保存的邮箱配置。</p>
-          <p>如果服务端要求授权码，请在邮箱管理页保存授权码而不是登录密码。</p>
-          <p v-if="message" :class="messageClass">{{ message }}</p>
-        </div>
-      </section>
-    </main>
-  </div>
+          <q-card-section v-if="message">
+            <q-banner rounded :class="isError ? 'bg-red-1 text-negative' : 'bg-green-1 text-positive'">
+              {{ message }}
+            </q-banner>
+          </q-card-section>
+        </q-card>
+      </div>
+    </div>
+  </AppShell>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { request, type MailAccount } from '@/api'
+import AppShell from '@/components/AppShell.vue'
 
 const router = useRouter()
 const accounts = ref<MailAccount[]>([])
@@ -66,7 +112,10 @@ const form = reactive({
   is_html: false,
 })
 
-const messageClass = computed(() => (isError.value ? 'error-text' : 'success-text'))
+const accountOptions = computed(() => [
+  { label: '选择发件邮箱', value: 0 },
+  ...accounts.value.map((item) => ({ label: `${item.name} / ${item.email}`, value: item.id })),
+])
 
 // loadAccounts 让写信页直接复用已有邮箱配置作为发件账户。
 async function loadAccounts() {

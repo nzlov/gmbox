@@ -1,79 +1,91 @@
 <template>
-  <div class="page-shell">
-    <aside class="sidebar">
-      <div>
-        <div class="brand-pill">G</div>
-        <h2>gmbox</h2>
-      </div>
-      <nav class="nav-links">
-        <RouterLink to="/inbox">聚合信息</RouterLink>
-        <RouterLink to="/compose">写信</RouterLink>
-        <RouterLink to="/accounts">邮箱管理</RouterLink>
-      </nav>
-      <button class="ghost-btn sidebar-logout" @click="logout">退出登录</button>
-    </aside>
+  <AppShell
+    active="inbox"
+    eyebrow="邮件详情"
+    :title="currentMessage.subject || '(无主题)'"
+    subtitle="详情页支持已读、删除、移动与远程图片开关，同时维持正文安全清洗策略。"
+    @logout="logout"
+  >
+    <template #hero-actions>
+      <q-btn outline color="primary" no-caps icon="arrow_back" label="返回列表" @click="router.push('/inbox')" />
+    </template>
 
-    <main class="content-shell">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">邮件详情</p>
-          <h1>{{ currentMessage.subject || '(无主题)' }}</h1>
-        </div>
-        <button class="ghost-btn" @click="router.push('/inbox')">返回列表</button>
-      </header>
-
-      <section class="panel" v-if="detail">
-        <div class="detail-meta">
-          <div>
-            <strong>{{ currentMessage.from_name || currentMessage.from_address || '未知发件人' }}</strong>
-            <p>{{ currentMessage.from_address || '未知地址' }}</p>
-          </div>
-          <div class="mail-meta">
-            <span>{{ currentMessage.folder || '未知文件夹' }}</span>
-            <time>{{ formatDate(currentMessage.sent_at) }}</time>
+    <q-card v-if="detail" flat class="app-glass-card">
+      <q-card-section class="row q-col-gutter-lg items-start">
+        <div class="col-12 col-lg">
+          <div class="text-h6 text-weight-bold">{{ currentMessage.from_name || currentMessage.from_address || '未知发件人' }}</div>
+          <div class="text-body2 text-grey-7 q-mt-xs">{{ currentMessage.from_address || '未知地址' }}</div>
+          <div class="row q-gutter-sm q-mt-md">
+            <q-badge color="blue-1" text-color="primary">{{ currentMessage.folder || '未知文件夹' }}</q-badge>
+            <q-badge v-if="currentMessage.has_attachment" color="deep-purple-1" text-color="deep-purple-8">含附件</q-badge>
           </div>
         </div>
-
-        <div class="detail-actions">
-          <button class="ghost-btn" @click="markRead(true)">标记已读</button>
-          <button class="ghost-btn" @click="markRead(false)">标记未读</button>
-          <button class="ghost-btn" @click="deleteMessage">删除</button>
-          <button class="ghost-btn" @click="toggleImages">
-            {{ showRemoteImages ? '隐藏图片' : '显示图片' }}
-          </button>
+        <div class="col-12 col-lg-auto text-grey-7">
+          {{ formatDate(currentMessage.sent_at) }}
         </div>
+      </q-card-section>
 
-        <div class="move-row">
-          <select v-model="targetFolder">
-            <option value="">选择目标文件夹</option>
-            <option v-for="mailbox in mailboxes" :key="mailbox.id" :value="mailbox.path">
-              {{ mailbox.name }}
-            </option>
-          </select>
-          <button class="primary-btn" @click="moveMessage">移动邮件</button>
+      <q-card-section class="row q-col-gutter-sm">
+        <div class="col-12 col-xl-8 row q-gutter-sm">
+          <q-btn outline color="primary" no-caps label="标记已读" @click="markRead(true)" />
+          <q-btn outline color="primary" no-caps label="标记未读" @click="markRead(false)" />
+          <q-btn outline color="negative" no-caps label="删除邮件" @click="deleteMessage" />
+          <q-btn outline color="secondary" no-caps :label="showRemoteImages ? '隐藏图片' : '显示图片'" @click="toggleImages" />
         </div>
+        <div class="col-12 col-xl-4 row q-gutter-sm justify-end">
+          <q-select
+            v-model="targetFolder"
+            outlined
+            dense
+            emit-value
+            map-options
+            :options="mailboxOptions"
+            label="目标文件夹"
+            style="min-width: 220px"
+          />
+          <q-btn color="primary" unelevated no-caps label="移动邮件" @click="moveMessage" />
+        </div>
+      </q-card-section>
 
-        <div v-if="message" :class="messageClass">{{ message }}</div>
+      <q-card-section v-if="message">
+        <q-banner rounded :class="isError ? 'bg-red-1 text-negative' : 'bg-green-1 text-positive'">
+          {{ message }}
+        </q-banner>
+      </q-card-section>
 
-        <article v-if="sanitizedHtml" class="detail-body detail-html" v-html="sanitizedHtml"></article>
-        <article v-else class="detail-body">{{ safeBody }}</article>
+      <q-separator />
 
-        <section v-if="currentAttachments.length > 0" class="attachment-list">
-          <h3>附件</h3>
-          <button
-            v-for="attachment in currentAttachments"
-            :key="attachment.id"
-            type="button"
-            class="attachment-item"
-            @click="downloadAttachment(attachment.id)"
-          >
-            <span>{{ attachment.file_name }}</span>
-            <small>{{ formatSize(attachment.size) }}</small>
-          </button>
-        </section>
-      </section>
-    </main>
-  </div>
+      <q-card-section>
+        <article v-if="sanitizedHtml" class="mail-html" v-html="sanitizedHtml"></article>
+        <article v-else class="mail-text">{{ safeBody }}</article>
+      </q-card-section>
+
+      <template v-if="currentAttachments.length > 0">
+        <q-separator />
+        <q-card-section>
+          <div class="section-title q-mb-md">附件</div>
+          <q-list bordered separator class="rounded-borders overflow-hidden">
+            <q-item v-for="attachment in currentAttachments" :key="attachment.id" clickable @click="downloadAttachment(attachment.id)">
+              <q-item-section avatar>
+                <q-icon name="attach_file" color="primary" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>{{ attachment.file_name }}</q-item-label>
+                <q-item-label caption>{{ attachment.content_type || '未知类型' }}</q-item-label>
+              </q-item-section>
+              <q-item-section side>
+                <div class="text-caption text-grey-7">{{ formatSize(attachment.size) }}</div>
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-card-section>
+      </template>
+    </q-card>
+
+    <q-banner v-else-if="message" rounded class="bg-red-1 text-negative">
+      {{ message }}
+    </q-banner>
+  </AppShell>
 </template>
 
 <script setup lang="ts">
@@ -81,6 +93,7 @@ import DOMPurify from 'dompurify'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { request, type AttachmentItem, type MailboxItem, type MessageDetailResponse, type MessageItem } from '@/api'
+import AppShell from '@/components/AppShell.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -91,7 +104,6 @@ const message = ref('')
 const isError = ref(false)
 const showRemoteImages = ref(false)
 
-const messageClass = computed(() => (isError.value ? 'error-text' : 'success-text'))
 const currentMessage = computed<MessageItem>(() =>
   detail.value?.message ?? {
     id: 0,
@@ -178,6 +190,10 @@ const safeBody = computed(() => {
   }
   return detail.value.message.snippet || ''
 })
+const mailboxOptions = computed(() => [
+  { label: '选择目标文件夹', value: '' },
+  ...mailboxes.value.map((mailbox) => ({ label: mailbox.name, value: mailbox.path })),
+])
 
 // loadDetail 获取正文和附件列表，供详情页展示和操作。
 async function loadDetail() {
@@ -296,11 +312,7 @@ function hardenSanitizedHtml(html: string) {
       return
     }
     const lowerHref = href.toLowerCase()
-    if (
-      !lowerHref.startsWith('http://') &&
-      !lowerHref.startsWith('https://') &&
-      !lowerHref.startsWith('mailto:')
-    ) {
+    if (!lowerHref.startsWith('http://') && !lowerHref.startsWith('https://') && !lowerHref.startsWith('mailto:')) {
       anchor.removeAttribute('href')
       return
     }

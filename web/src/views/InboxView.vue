@@ -1,128 +1,169 @@
 <template>
-  <div class="page-shell">
-    <aside class="sidebar">
-      <div>
-        <div class="brand-pill">G</div>
-        <h2>gmbox</h2>
+  <AppShell
+    active="inbox"
+    eyebrow="聚合视图"
+    title="聚合信息"
+    subtitle="按账户、文件夹与关键词交叉筛选邮件，保持多邮箱处理链路集中在一个页面。"
+    @logout="logout"
+  >
+    <template #actions>
+      <q-btn flat round dense color="white" icon="refresh" @click="refreshAll" />
+    </template>
+
+    <template #hero-actions>
+      <q-btn color="primary" unelevated no-caps icon="refresh" label="刷新列表" @click="refreshAll" />
+    </template>
+
+    <div class="row q-col-gutter-lg">
+      <div class="col-12 col-lg-4 col-xl-3">
+        <q-card flat class="app-glass-card full-height">
+          <q-card-section>
+            <div class="section-title">邮箱与文件夹</div>
+            <div class="section-subtitle q-mt-xs">切换账户后会联动刷新文件夹与邮件列表。</div>
+          </q-card-section>
+          <q-card-section class="q-pt-none">
+            <q-select
+              v-model="selectedAccount"
+              outlined
+              dense
+              emit-value
+              map-options
+              :options="accountOptions"
+              label="筛选邮箱"
+              @update:model-value="handleAccountChange"
+            />
+          </q-card-section>
+          <q-card-section class="q-pt-none">
+            <q-list separator>
+              <q-item clickable :active="selectedFolder === ''" active-class="bg-primary text-white" @click="selectFolder('')">
+                <q-item-section>
+                  <q-item-label>全部文件夹</q-item-label>
+                  <q-item-label caption :class="selectedFolder === '' ? 'text-white' : 'text-grey-6'">显示当前筛选下的所有邮件</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-badge color="primary" text-color="white">{{ total }}</q-badge>
+                </q-item-section>
+              </q-item>
+              <q-item
+                v-for="mailbox in mailboxes"
+                :key="mailbox.id"
+                clickable
+                :active="selectedFolder === mailbox.path"
+                active-class="bg-primary text-white"
+                @click="selectFolder(mailbox.path)"
+              >
+                <q-item-section>
+                  <q-item-label>{{ mailbox.name }}</q-item-label>
+                  <q-item-label caption :class="selectedFolder === mailbox.path ? 'text-white' : 'text-grey-6'">
+                    {{ mailbox.role || mailbox.path }}
+                  </q-item-label>
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </q-card-section>
+        </q-card>
       </div>
-      <nav class="nav-links">
-        <RouterLink to="/inbox">聚合信息</RouterLink>
-        <RouterLink to="/compose">写信</RouterLink>
-        <RouterLink to="/accounts">邮箱管理</RouterLink>
-      </nav>
-      <button class="ghost-btn sidebar-logout" @click="logout">退出登录</button>
-    </aside>
 
-    <main class="content-shell">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">聚合视图</p>
-          <h1>聚合信息</h1>
-        </div>
-        <button class="primary-btn" @click="refreshAll">刷新</button>
-      </header>
-
-      <section class="inbox-layout">
-        <aside class="panel inbox-sidebar-panel">
-          <div class="panel-head panel-head-stack">
-            <div>
-              <h3>邮箱与文件夹</h3>
-              <span class="muted">邮箱切换后联动刷新文件夹与邮件列表。</span>
+      <div class="col-12 col-lg-8 col-xl-9">
+        <q-card flat class="app-glass-card">
+          <q-card-section class="row q-col-gutter-md items-center">
+            <div class="col-12 col-md">
+              <div class="section-title">邮件列表</div>
+              <div class="section-subtitle q-mt-xs">按时间倒序展示，支持关键词搜索与分页切换。</div>
             </div>
-          </div>
-
-          <select v-model="selectedAccount" @change="handleAccountChange">
-            <option value="">全部邮箱</option>
-            <option v-for="account in accounts" :key="account.id" :value="String(account.id)">
-              {{ account.name }} / {{ account.email }}
-            </option>
-          </select>
-
-          <div class="folder-list">
-            <button
-              type="button"
-              class="folder-item"
-              :class="{ active: selectedFolder === '' }"
-              @click="selectFolder('')"
-            >
-              <span>全部文件夹</span>
-              <small>{{ total }}</small>
-            </button>
-            <button
-              v-for="mailbox in mailboxes"
-              :key="mailbox.id"
-              type="button"
-              class="folder-item"
-              :class="{ active: selectedFolder === mailbox.path }"
-              @click="selectFolder(mailbox.path)"
-            >
-              <span>{{ mailbox.name }}</span>
-              <small>{{ mailbox.role || mailbox.path }}</small>
-            </button>
-          </div>
-        </aside>
-
-        <section class="panel inbox-main-panel">
-          <div class="panel-head panel-head-stack panel-tools">
-            <div>
-              <h3>邮件列表</h3>
-              <span class="muted">按时间倒序展示，搜索结果受左侧邮箱与文件夹选择约束。</span>
+            <div class="col-12 col-md-5">
+              <q-input
+                v-model.trim="keywordInput"
+                outlined
+                dense
+                label="搜索主题、发件人或摘要"
+                @keyup.enter="applyKeywordNow"
+              >
+                <template #append>
+                  <q-btn v-if="keywordInput" flat round dense icon="close" @click="clearKeyword" />
+                </template>
+              </q-input>
             </div>
-            <div class="toolbar-grid">
-              <div class="search-box">
-                <input v-model.trim="keywordInput" placeholder="搜索主题、发件人或摘要" @keyup.enter="applyKeywordNow" />
-                <button v-if="keywordInput" type="button" class="search-clear-btn" @click="clearKeyword">清空</button>
-              </div>
-              <div class="toolbar-actions">
-                <select v-model.number="pageSize" @change="handlePageSizeChange">
-                  <option :value="10">10 条/页</option>
-                  <option :value="20">20 条/页</option>
-                  <option :value="50">50 条/页</option>
-                  <option :value="100">100 条/页</option>
-                </select>
-                <button class="ghost-btn" @click="applyKeywordNow">搜索</button>
-              </div>
+            <div class="col-12 col-md-auto row q-gutter-sm justify-end">
+              <q-select
+                v-model="pageSize"
+                outlined
+                dense
+                emit-value
+                map-options
+                :options="pageSizeOptions"
+                style="min-width: 128px"
+                @update:model-value="handlePageSizeChange"
+              />
+              <q-btn color="primary" unelevated no-caps icon="search" label="搜索" @click="applyKeywordNow" />
             </div>
-          </div>
+          </q-card-section>
 
-          <div v-if="error" class="error-text">{{ error }}</div>
-          <div v-else-if="messages.length === 0" class="empty-state">暂无匹配邮件，可调整筛选条件后重试。</div>
-          <button
-            v-for="item in messages"
-            :key="item.id"
-            type="button"
-            class="mail-item mail-button"
-            @click="openDetail(item.id)"
-          >
-            <div>
-              <strong :class="item.is_read ? 'mail-read' : 'mail-unread'">{{ item.subject || '(无主题)' }}</strong>
-              <p>{{ item.from_name || item.from_address }}</p>
-              <small>{{ item.folder }}</small>
-            </div>
-            <div class="mail-meta">
-              <span>{{ item.snippet || '暂无摘要' }}</span>
-              <small v-if="item.has_attachment">含附件</small>
-              <time>{{ formatDate(item.sent_at) }}</time>
-            </div>
-          </button>
+          <q-separator />
 
-          <div class="pagination-bar">
-            <span class="muted">共 {{ total }} 封，第 {{ page }} / {{ totalPages }} 页</span>
-            <div class="toolbar-actions">
-              <button class="ghost-btn" :disabled="page <= 1" @click="loadMessages(page - 1)">上一页</button>
-              <button class="ghost-btn" :disabled="page >= totalPages" @click="loadMessages(page + 1)">下一页</button>
+          <q-card-section>
+            <q-banner v-if="error" rounded dense class="bg-red-1 text-negative q-mb-md">
+              {{ error }}
+            </q-banner>
+
+            <q-list v-if="messages.length > 0" separator>
+              <q-item
+                v-for="item in messages"
+                :key="item.id"
+                clickable
+                class="mail-list-item"
+                :class="item.is_read ? 'mail-read-card' : 'mail-unread-card'"
+                @click="openDetail(item.id)"
+              >
+                <q-item-section>
+                  <q-item-label class="text-subtitle1 text-weight-medium">
+                    {{ item.subject || '(无主题)' }}
+                  </q-item-label>
+                  <q-item-label caption class="q-mt-xs">
+                    {{ item.from_name || item.from_address }}
+                  </q-item-label>
+                  <q-item-label caption class="q-mt-xs text-grey-7">
+                    {{ item.snippet || '暂无摘要' }}
+                  </q-item-label>
+                  <div class="row q-gutter-sm q-mt-sm">
+                    <q-badge color="blue-1" text-color="primary">{{ item.folder }}</q-badge>
+                    <q-badge v-if="item.has_attachment" color="deep-purple-1" text-color="deep-purple-8">含附件</q-badge>
+                  </div>
+                </q-item-section>
+                <q-item-section side top>
+                  <div class="text-caption text-grey-6">{{ formatDate(item.sent_at) }}</div>
+                  <q-icon v-if="!item.is_read" name="mark_email_unread" color="primary" size="20px" class="q-mt-sm" />
+                </q-item-section>
+              </q-item>
+            </q-list>
+
+            <div v-else class="column items-center justify-center text-center q-py-xl text-grey-7">
+              <q-icon name="inbox" size="56px" color="grey-5" />
+              <div class="text-subtitle1 q-mt-md">暂无匹配邮件</div>
+              <div class="text-body2 q-mt-xs">可以调整账户、文件夹或搜索词后重试。</div>
             </div>
-          </div>
-        </section>
-      </section>
-    </main>
-  </div>
+          </q-card-section>
+
+          <q-separator />
+
+          <q-card-section class="row items-center justify-between q-gutter-sm">
+            <div class="text-body2 text-grey-7">共 {{ total }} 封，第 {{ page }} / {{ totalPages }} 页</div>
+            <div class="row q-gutter-sm">
+              <q-btn outline color="primary" no-caps :disable="page <= 1" label="上一页" @click="loadMessages(page - 1)" />
+              <q-btn outline color="primary" no-caps :disable="page >= totalPages" label="下一页" @click="loadMessages(page + 1)" />
+            </div>
+          </q-card-section>
+        </q-card>
+      </div>
+    </div>
+  </AppShell>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { request, type MailAccount, type MailboxItem, type MessageItem, type MessageListResponse } from '@/api'
+import AppShell from '@/components/AppShell.vue'
 
 const router = useRouter()
 const accounts = ref<MailAccount[]>([])
@@ -139,6 +180,16 @@ const total = ref(0)
 let keywordTimer: ReturnType<typeof setTimeout> | null = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const accountOptions = computed(() => [
+  { label: '全部邮箱', value: '' },
+  ...accounts.value.map((account) => ({ label: `${account.name} / ${account.email}`, value: String(account.id) })),
+])
+const pageSizeOptions = [
+  { label: '10 条/页', value: 10 },
+  { label: '20 条/页', value: 20 },
+  { label: '50 条/页', value: 50 },
+  { label: '100 条/页', value: 100 },
+]
 
 // refreshAll 统一刷新邮箱、文件夹和邮件列表，避免筛选项与数据源脱节。
 async function refreshAll() {
@@ -273,3 +324,24 @@ onBeforeUnmount(() => {
 
 onMounted(refreshAll)
 </script>
+
+<style scoped>
+.mail-list-item {
+  border-radius: 18px;
+  margin-bottom: 10px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mail-list-item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.mail-unread-card {
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.62), rgba(255, 255, 255, 0.88));
+}
+
+.mail-read-card {
+  background: rgba(255, 255, 255, 0.72);
+}
+</style>

@@ -1,251 +1,260 @@
 <template>
-  <div class="page-shell">
-    <aside class="sidebar">
-      <div>
-        <div class="brand-pill">G</div>
-        <h2>gmbox</h2>
-      </div>
-      <nav class="nav-links">
-        <RouterLink to="/inbox">聚合信息</RouterLink>
-        <RouterLink to="/compose">写信</RouterLink>
-        <RouterLink to="/accounts">邮箱管理</RouterLink>
-      </nav>
-      <button class="ghost-btn sidebar-logout" @click="logout">退出登录</button>
-    </aside>
+  <AppShell
+    active="accounts"
+    eyebrow="多邮箱管理"
+    title="邮箱账户"
+    subtitle="集中维护服务商预设、微软 OAuth、批量导入与单账户操作，把多邮箱接入面板收敛到统一工作流。"
+    @logout="logout"
+  >
+    <template #hero-actions>
+      <q-btn outline color="primary" no-caps icon="upload_file" label="批量导入" @click="openImportModal" />
+      <q-btn color="primary" unelevated no-caps icon="add" label="添加邮箱" @click="openCreateModal" />
+    </template>
 
-    <main class="content-shell">
-      <header class="topbar accounts-topbar">
-        <div>
-          <p class="eyebrow">多邮箱管理</p>
-          <h1>邮箱账户</h1>
-        </div>
-        <div class="toolbar-actions wrap-actions">
-          <button class="ghost-btn" @click="openImportModal">批量导入</button>
-          <button class="primary-btn" @click="openCreateModal">添加邮箱</button>
-        </div>
-      </header>
+    <q-card flat class="app-glass-card">
+      <q-card-section v-if="message || error" class="q-pt-none">
+        <q-banner v-if="message" rounded class="bg-green-1 text-positive q-mb-sm">{{ message }}</q-banner>
+        <q-banner v-if="error" rounded class="bg-red-1 text-negative">{{ error }}</q-banner>
+      </q-card-section>
 
-      <section class="panel table-panel">
-        <div class="panel-head panel-tools">
-          <div>
-            <h3>邮箱列表</h3>
-            <span class="muted">支持服务商自动配置、微软 OAuth 和非 OAuth 批量导入。</span>
-          </div>
-          <div class="toolbar-actions wrap-actions">
-            <button class="ghost-btn" :disabled="!hasSelection" @click="batchUpdateEnabled(true)">启用</button>
-            <button class="ghost-btn" :disabled="!hasSelection" @click="batchUpdateEnabled(false)">禁用</button>
-            <button class="ghost-btn" :disabled="!hasSelection" @click="batchSync">同步</button>
-            <button class="ghost-btn" :disabled="!hasSelection" @click="batchTest">测试</button>
-            <button class="ghost-btn danger-btn" :disabled="!hasSelection" @click="batchDelete">删除</button>
-          </div>
-        </div>
-
-        <p v-if="message" :class="messageClass">{{ message }}</p>
-        <p v-if="error" class="error-text">{{ error }}</p>
-
-        <div class="table-wrapper">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th><input :checked="allSelected" type="checkbox" @change="toggleAll($event)" /></th>
-                <th>名称</th>
-                <th>邮箱</th>
-                <th>服务商</th>
-                <th>认证</th>
-                <th>协议</th>
-                <th>收信配置</th>
-                <th>SMTP</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="accounts.length === 0">
-                <td colspan="10" class="empty-cell">暂无邮箱，请先添加。</td>
-              </tr>
-              <tr v-for="item in accounts" :key="item.id">
-                <td>
-                  <input v-model="selectedIDs" type="checkbox" :value="item.id" />
-                </td>
-                <td>{{ item.name }}</td>
-                <td>{{ item.email }}</td>
-                <td>{{ item.provider_name }}</td>
-                <td>
-                  <span class="status-badge" :class="item.auth_type === 'oauth' ? 'status-enabled' : 'status-disabled'">
-                    {{ item.auth_type === 'oauth' ? 'OAuth' : '密码' }}
-                  </span>
-                </td>
-                <td>{{ item.incoming_protocol.toUpperCase() }}</td>
-                <td>{{ incomingHost(item) }}:{{ incomingPort(item) }}</td>
-                <td>{{ item.smtp_host }}:{{ item.smtp_port }}</td>
-                <td>
-                  <span class="status-badge" :class="item.enabled ? 'status-enabled' : 'status-disabled'">
-                    {{ item.enabled ? '已启用' : '已禁用' }}
-                  </span>
-                </td>
-                <td>
-                  <div class="toolbar-actions wrap-actions">
-                    <button class="ghost-btn" @click="openEditModal(item)">编辑</button>
-                    <button class="ghost-btn" @click="test(item.id)">测试</button>
-                    <button class="ghost-btn" @click="sync(item.id)">同步</button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <div v-if="showModal" class="modal-mask" @click.self="closeModal">
-        <section class="modal-card account-modal-card">
-          <div class="panel-head">
-            <div>
-              <h3>{{ editingID ? '修改邮箱' : '添加邮箱' }}</h3>
-              <span class="muted">选择常见服务商后自动填充 IMAP、POP3、SMTP，仍可继续修改。</span>
+      <q-table
+        v-model:selected="selectedRows"
+        flat
+        row-key="id"
+        selection="multiple"
+        :rows="accounts"
+        :columns="columns"
+        :filter="tableFilter"
+        :pagination="tablePagination"
+        :rows-per-page-options="[10, 20, 50, 100]"
+        no-data-label="暂无邮箱，请先添加。"
+      >
+        <template #top>
+          <div class="full-width row q-col-gutter-md items-center">
+            <div class="col-12 col-xl">
+              <div class="section-title">邮箱列表</div>
+              <div class="section-subtitle q-mt-xs">支持服务商自动配置、微软 OAuth 和非 OAuth 批量导入。</div>
             </div>
-            <button class="ghost-btn" @click="closeModal">关闭</button>
+            <div class="col-12 col-xl-4">
+              <q-input v-model.trim="tableFilter" outlined dense clearable label="搜索名称、邮箱或服务商" />
+            </div>
+            <div class="col-12 row q-gutter-sm wrap justify-end">
+              <q-btn outline color="primary" no-caps :disable="!hasSelection" label="启用" @click="batchUpdateEnabled(true)" />
+              <q-btn outline color="primary" no-caps :disable="!hasSelection" label="禁用" @click="batchUpdateEnabled(false)" />
+              <q-btn outline color="secondary" no-caps :disable="!hasSelection" label="同步" @click="batchSync" />
+              <q-btn outline color="secondary" no-caps :disable="!hasSelection" label="测试" @click="batchTest" />
+              <q-btn outline color="negative" no-caps :disable="!hasSelection" label="删除" @click="batchDelete" />
+            </div>
           </div>
+        </template>
 
-          <form class="form-grid account-form-grid" @submit.prevent="submit">
-            <label class="form-block span-2">
-              <span>服务商</span>
-              <select v-model="form.provider" @change="handleProviderChange()">
-                <option v-for="item in providers" :key="item.key" :value="item.key">{{ item.name }}</option>
-              </select>
-            </label>
+        <template #body-cell-auth_type="props">
+          <q-td :props="props">
+            <q-badge :color="props.row.auth_type === 'oauth' ? 'primary' : 'grey-4'" :text-color="props.row.auth_type === 'oauth' ? 'white' : 'dark'">
+              {{ props.row.auth_type === 'oauth' ? 'OAuth' : '密码' }}
+            </q-badge>
+          </q-td>
+        </template>
 
-            <label class="form-block span-2" v-if="form.provider === 'custom'">
-              <span>自定义服务商名称</span>
-              <input v-model="form.provider_name" placeholder="例如：公司邮箱" />
-            </label>
+        <template #body-cell-enabled="props">
+          <q-td :props="props">
+            <q-badge :color="props.row.enabled ? 'positive' : 'grey-4'" :text-color="props.row.enabled ? 'white' : 'dark'">
+              {{ props.row.enabled ? '已启用' : '已禁用' }}
+            </q-badge>
+          </q-td>
+        </template>
 
-            <label class="form-block">
-              <span>展示名称</span>
-              <input v-model="form.name" placeholder="展示名称" />
-            </label>
-            <label class="form-block">
-              <span>邮箱地址</span>
-              <input v-model="form.email" placeholder="邮箱地址" />
-            </label>
-            <label class="form-block">
-              <span>登录用户名</span>
-              <input v-model="form.username" placeholder="登录用户名，默认建议填邮箱地址" />
-            </label>
-            <label class="form-block">
-              <span>认证方式</span>
-              <select v-model="form.auth_type" @change="handleAuthTypeChange()">
-                <option value="password">密码 / 授权码</option>
-                <option :disabled="!oauthAvailable" value="oauth">微软 OAuth</option>
-              </select>
-            </label>
+        <template #body-cell-actions="props">
+          <q-td :props="props">
+            <div class="row q-gutter-xs no-wrap">
+              <q-btn flat dense no-caps color="primary" label="编辑" @click="openEditModal(props.row)" />
+              <q-btn flat dense no-caps color="secondary" label="测试" @click="test(props.row.id)" />
+              <q-btn flat dense no-caps color="secondary" label="同步" @click="sync(props.row.id)" />
+            </div>
+          </q-td>
+        </template>
+      </q-table>
+    </q-card>
 
-            <label class="form-block span-2" v-if="form.auth_type === 'password'">
-              <span>密码或授权码</span>
-              <input v-model="form.password" type="password" :placeholder="editingID ? '留空则保持原密码' : '密码或授权码'" />
-            </label>
+    <q-dialog v-model="showModal" @hide="closeModal">
+      <q-card class="account-dialog-card">
+        <q-card-section class="row items-start justify-between q-col-gutter-md">
+          <div class="col">
+            <div class="text-h6 text-weight-bold">{{ editingID ? '修改邮箱' : '添加邮箱' }}</div>
+            <div class="text-body2 text-grey-7 q-mt-xs">选择常见服务商后自动填充 IMAP、POP3、SMTP，仍可继续修改。</div>
+          </div>
+          <div class="col-auto">
+            <q-btn flat round dense icon="close" @click="closeModal" />
+          </div>
+        </q-card-section>
 
-            <div v-else class="oauth-panel span-2">
-              <div>
-                <strong>微软 OAuth 授权</strong>
-                <p class="muted">完成授权后会自动接入 Outlook / Microsoft 365 邮箱，并可继续修改 IMAP、SMTP 配置。</p>
-              </div>
-              <button class="ghost-btn" type="button" :disabled="!microsoftOAuthEnabled" @click="startMicrosoftOAuth">
-                {{ microsoftOAuthEnabled ? '连接微软邮箱' : '未配置微软 OAuth' }}
-              </button>
+        <q-separator />
+
+        <q-card-section>
+          <q-form class="row q-col-gutter-md" @submit.prevent="submit">
+            <div class="col-12">
+              <q-select
+                v-model="form.provider"
+                outlined
+                dense
+                emit-value
+                map-options
+                :options="providerOptions"
+                label="服务商"
+                @update:model-value="handleProviderChange"
+              />
             </div>
 
-            <label class="form-block">
-              <span>收信协议</span>
-              <select v-model="form.incoming_protocol" :disabled="form.auth_type === 'oauth'">
-                <option value="imap">IMAP</option>
-                <option value="pop3" :disabled="form.auth_type === 'oauth'">POP3</option>
-              </select>
-            </label>
-            <label class="switch-row form-block">
-              <span>启用 TLS</span>
-              <input v-model="form.use_tls" :disabled="form.auth_type === 'oauth'" type="checkbox" />
-            </label>
+            <div v-if="form.provider === 'custom'" class="col-12">
+              <q-input v-model="form.provider_name" outlined dense label="自定义服务商名称" placeholder="例如：公司邮箱" />
+            </div>
+
+            <div class="col-12 col-md-6">
+              <q-input v-model="form.name" outlined dense label="展示名称" />
+            </div>
+            <div class="col-12 col-md-6">
+              <q-input v-model="form.email" outlined dense label="邮箱地址" />
+            </div>
+            <div class="col-12 col-md-6">
+              <q-input v-model="form.username" outlined dense label="登录用户名" hint="默认建议填邮箱地址" />
+            </div>
+            <div class="col-12 col-md-6">
+              <q-select
+                v-model="form.auth_type"
+                outlined
+                dense
+                emit-value
+                map-options
+                :options="authOptions"
+                label="认证方式"
+                @update:model-value="handleAuthTypeChange"
+              />
+            </div>
+
+            <div v-if="form.auth_type === 'password'" class="col-12">
+              <q-input
+                v-model="form.password"
+                outlined
+                dense
+                type="password"
+                label="密码或授权码"
+                :placeholder="editingID ? '留空则保持原密码' : '密码或授权码'"
+              />
+            </div>
+
+            <div v-else class="col-12">
+              <q-banner rounded class="bg-blue-1 text-primary">
+                <div class="text-subtitle2 text-weight-medium">微软 OAuth 授权</div>
+                <div class="text-body2 q-mt-xs">完成授权后会自动接入 Outlook / Microsoft 365 邮箱，并可继续修改 IMAP、SMTP 配置。</div>
+                <template #action>
+                  <q-btn
+                    flat
+                    no-caps
+                    color="primary"
+                    :disable="!microsoftOAuthEnabled"
+                    :label="microsoftOAuthEnabled ? '连接微软邮箱' : '未配置微软 OAuth'"
+                    @click="startMicrosoftOAuth"
+                  />
+                </template>
+              </q-banner>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <q-select
+                v-model="form.incoming_protocol"
+                outlined
+                dense
+                emit-value
+                map-options
+                :options="protocolOptions"
+                label="收信协议"
+                :disable="form.auth_type === 'oauth'"
+              />
+            </div>
+            <div class="col-12 col-md-6 row items-center">
+              <q-toggle v-model="form.use_tls" color="primary" label="启用 TLS" :disable="form.auth_type === 'oauth'" />
+            </div>
 
             <template v-if="form.incoming_protocol === 'imap'">
-              <label class="form-block">
-                <span>IMAP Host</span>
-                <input v-model="form.imap_host" placeholder="IMAP Host" />
-              </label>
-              <label class="form-block">
-                <span>IMAP Port</span>
-                <input v-model.number="form.imap_port" type="number" placeholder="IMAP Port" />
-              </label>
+              <div class="col-12 col-md-6">
+                <q-input v-model="form.imap_host" outlined dense label="IMAP Host" />
+              </div>
+              <div class="col-12 col-md-6">
+                <q-input v-model.number="form.imap_port" outlined dense type="number" label="IMAP Port" />
+              </div>
             </template>
             <template v-else>
-              <label class="form-block">
-                <span>POP3 Host</span>
-                <input v-model="form.pop3_host" placeholder="POP3 Host" />
-              </label>
-              <label class="form-block">
-                <span>POP3 Port</span>
-                <input v-model.number="form.pop3_port" type="number" placeholder="POP3 Port" />
-              </label>
+              <div class="col-12 col-md-6">
+                <q-input v-model="form.pop3_host" outlined dense label="POP3 Host" />
+              </div>
+              <div class="col-12 col-md-6">
+                <q-input v-model.number="form.pop3_port" outlined dense type="number" label="POP3 Port" />
+              </div>
             </template>
 
-            <label class="form-block">
-              <span>SMTP Host</span>
-              <input v-model="form.smtp_host" placeholder="SMTP Host" />
-            </label>
-            <label class="form-block">
-              <span>SMTP Port</span>
-              <input v-model.number="form.smtp_port" type="number" placeholder="SMTP Port" />
-            </label>
-            <label class="switch-row form-block span-2">
-              <span>启用账户</span>
-              <input v-model="form.enabled" type="checkbox" />
-            </label>
-            <button class="primary-btn span-2">{{ editingID ? '保存修改' : '保存邮箱' }}</button>
-          </form>
-        </section>
-      </div>
-
-      <div v-if="showImportModal" class="modal-mask" @click.self="closeImportModal">
-        <section class="modal-card account-modal-card">
-          <div class="panel-head">
-            <div>
-              <h3>批量导入非 OAuth 邮箱</h3>
-              <span class="muted">每行一个邮箱，支持英文逗号或制表符分隔，已知服务商可自动补齐服务器配置。</span>
+            <div class="col-12 col-md-6">
+              <q-input v-model="form.smtp_host" outlined dense label="SMTP Host" />
             </div>
-            <button class="ghost-btn" @click="closeImportModal">关闭</button>
+            <div class="col-12 col-md-6">
+              <q-input v-model.number="form.smtp_port" outlined dense type="number" label="SMTP Port" />
+            </div>
+            <div class="col-12">
+              <q-toggle v-model="form.enabled" color="primary" label="启用账户" />
+            </div>
+            <div class="col-12 row justify-end q-gutter-sm">
+              <q-btn flat no-caps label="取消" @click="closeModal" />
+              <q-btn color="primary" unelevated no-caps type="submit" :label="editingID ? '保存修改' : '保存邮箱'" />
+            </div>
+          </q-form>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
+
+    <q-dialog v-model="showImportModal" @hide="closeImportModal">
+      <q-card class="account-dialog-card">
+        <q-card-section class="row items-start justify-between q-col-gutter-md">
+          <div class="col">
+            <div class="text-h6 text-weight-bold">批量导入非 OAuth 邮箱</div>
+            <div class="text-body2 text-grey-7 q-mt-xs">每行一个邮箱，支持英文逗号或制表符分隔，已知服务商可自动补齐服务器配置。</div>
           </div>
-
-          <div class="form-grid account-form-grid">
-            <label class="form-block span-2">
-              <span>导入内容</span>
-              <textarea
-                v-model="importText"
-                class="import-textarea"
-                rows="10"
-                placeholder="name,email,username,password,provider,protocol,incoming_host,incoming_port,smtp_host,smtp_port,use_tls"
-              />
-            </label>
-
-            <div class="import-help span-2 muted">
-              <p>列顺序：名称、邮箱、用户名、密码、服务商、协议、收信主机、收信端口、SMTP 主机、SMTP 端口、是否 TLS。</p>
-              <p>服务商可填：gmail、qq、163、126、aliyun、outlook、yahoo、custom。已知服务商留空主机和端口时会自动补齐。</p>
-              <p>示例：张三,zs@example.com,zs@example.com,authcode123,gmail,imap,,,,,true</p>
-            </div>
-
-            <div class="toolbar-actions wrap-actions span-2">
-              <button class="ghost-btn" type="button" @click="closeImportModal">取消</button>
-              <button class="primary-btn" type="button" @click="submitImport">开始导入</button>
-            </div>
+          <div class="col-auto">
+            <q-btn flat round dense icon="close" @click="closeImportModal" />
           </div>
-        </section>
-      </div>
-    </main>
-  </div>
+        </q-card-section>
+
+        <q-separator />
+
+        <q-card-section class="column q-gutter-md">
+          <q-input
+            v-model="importText"
+            outlined
+            autogrow
+            type="textarea"
+            label="导入内容"
+            placeholder="name,email,username,password,provider,protocol,incoming_host,incoming_port,smtp_host,smtp_port,use_tls"
+          />
+
+          <q-banner rounded class="bg-grey-1 text-grey-8">
+            <div>列顺序：名称、邮箱、用户名、密码、服务商、协议、收信主机、收信端口、SMTP 主机、SMTP 端口、是否 TLS。</div>
+            <div class="q-mt-sm">服务商可填：gmail、qq、163、126、aliyun、outlook、yahoo、custom。已知服务商留空主机和端口时会自动补齐。</div>
+            <div class="q-mt-sm">示例：张三,zs@example.com,zs@example.com,authcode123,gmail,imap,,,,,true</div>
+          </q-banner>
+
+          <div class="row justify-end q-gutter-sm">
+            <q-btn flat no-caps label="取消" @click="closeImportModal" />
+            <q-btn color="primary" unelevated no-caps label="开始导入" @click="submitImport" />
+          </div>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
+  </AppShell>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { request, type AccountProvidersResponse, type MailAccount, type ProviderPreset } from '@/api'
+import AppShell from '@/components/AppShell.vue'
 
 type AccountForm = {
   provider: string
@@ -276,15 +285,53 @@ const message = ref('')
 const showModal = ref(false)
 const showImportModal = ref(false)
 const editingID = ref<number | null>(null)
-const selectedIDs = ref<number[]>([])
+const selectedRows = ref<MailAccount[]>([])
 const importText = ref('')
+const tableFilter = ref('')
+const tablePagination = { rowsPerPage: 10 }
 const form = reactive<AccountForm>(createDefaultForm())
 
-const messageClass = computed(() => 'success-text')
-const hasSelection = computed(() => selectedIDs.value.length > 0)
-const allSelected = computed(() => accounts.value.length > 0 && selectedIDs.value.length === accounts.value.length)
+const hasSelection = computed(() => selectedRows.value.length > 0)
 const currentProviderPreset = computed(() => providers.value.find((item) => item.key === form.provider) ?? null)
 const oauthAvailable = computed(() => form.provider === 'outlook' && microsoftOAuthEnabled.value)
+const providerOptions = computed(() => providers.value.map((item) => ({ label: item.name, value: item.key })))
+const authOptions = computed(() => [
+  { label: '密码 / 授权码', value: 'password' },
+  { label: '微软 OAuth', value: 'oauth', disable: !oauthAvailable.value },
+])
+const protocolOptions = computed(() => [
+  { label: 'IMAP', value: 'imap' },
+  { label: 'POP3', value: 'pop3', disable: form.auth_type === 'oauth' },
+])
+
+// columns 统一定义 QTable 列，避免模板层重复拼装字段和格式化逻辑。
+const columns = [
+  { name: 'name', label: '名称', field: 'name', align: 'left' as const, sortable: true },
+  { name: 'email', label: '邮箱', field: 'email', align: 'left' as const, sortable: true },
+  { name: 'provider_name', label: '服务商', field: 'provider_name', align: 'left' as const, sortable: true },
+  { name: 'auth_type', label: '认证', field: 'auth_type', align: 'left' as const, sortable: true },
+  {
+    name: 'incoming_protocol',
+    label: '协议',
+    field: (row: MailAccount) => row.incoming_protocol.toUpperCase(),
+    align: 'left' as const,
+    sortable: true,
+  },
+  {
+    name: 'incoming_config',
+    label: '收信配置',
+    field: (row: MailAccount) => `${incomingHost(row)}:${incomingPort(row)}`,
+    align: 'left' as const,
+  },
+  {
+    name: 'smtp_config',
+    label: 'SMTP',
+    field: (row: MailAccount) => `${row.smtp_host}:${row.smtp_port}`,
+    align: 'left' as const,
+  },
+  { name: 'enabled', label: '状态', field: 'enabled', align: 'left' as const, sortable: true },
+  { name: 'actions', label: '操作', field: 'id', align: 'left' as const },
+]
 
 // createDefaultForm 统一生成表单初始值，避免重置时遗漏新增字段。
 function createDefaultForm(): AccountForm {
@@ -324,7 +371,7 @@ async function loadProviders() {
 async function loadAccounts() {
   error.value = ''
   accounts.value = await request<MailAccount[]>('/api/accounts')
-  selectedIDs.value = selectedIDs.value.filter((id) => accounts.value.some((item) => item.id === id))
+  selectedRows.value = selectedRows.value.filter((selected) => accounts.value.some((item) => item.id === selected.id))
 }
 
 // applyProviderPreset 用所选服务商默认值覆盖连接配置，但保留用户后续继续修改的能力。
@@ -583,12 +630,6 @@ function startMicrosoftOAuth() {
   window.location.href = '/api/accounts/oauth/microsoft/start'
 }
 
-// toggleAll 让表格多选支持一键选择当前页全部邮箱。
-function toggleAll(event: Event) {
-  const checked = (event.target as HTMLInputElement).checked
-  selectedIDs.value = checked ? accounts.value.map((item) => item.id) : []
-}
-
 // incomingHost 统一根据协议显示当前实际收信服务器，避免表格重复判断分支。
 function incomingHost(account: MailAccount) {
   return account.incoming_protocol === 'imap' ? account.imap_host : account.pop3_host
@@ -626,9 +667,8 @@ async function batchUpdateEnabled(enabled: boolean) {
   message.value = ''
   error.value = ''
   try {
-    const selectedAccounts = accounts.value.filter((item) => selectedIDs.value.includes(item.id))
     await Promise.all(
-      selectedAccounts.map((item) =>
+      selectedRows.value.map((item) =>
         request(`/api/accounts/${item.id}`, {
           method: 'PUT',
           body: JSON.stringify(buildAccountPayload(item, enabled)),
@@ -647,7 +687,7 @@ async function batchSync() {
   message.value = ''
   error.value = ''
   try {
-    await Promise.all(selectedIDs.value.map((id) => request(`/api/accounts/${id}/sync`, { method: 'POST' })))
+    await Promise.all(selectedRows.value.map((item) => request(`/api/accounts/${item.id}/sync`, { method: 'POST' })))
     message.value = '批量同步完成'
   } catch (err) {
     error.value = err instanceof Error ? err.message : '批量同步失败'
@@ -659,7 +699,7 @@ async function batchTest() {
   message.value = ''
   error.value = ''
   try {
-    await Promise.all(selectedIDs.value.map((id) => request(`/api/accounts/${id}/test`, { method: 'POST' })))
+    await Promise.all(selectedRows.value.map((item) => request(`/api/accounts/${item.id}/test`, { method: 'POST' })))
     message.value = '批量测试成功'
   } catch (err) {
     error.value = err instanceof Error ? err.message : '批量测试失败'
@@ -671,8 +711,8 @@ async function batchDelete() {
   message.value = ''
   error.value = ''
   try {
-    await Promise.all(selectedIDs.value.map((id) => request(`/api/accounts/${id}`, { method: 'DELETE' })))
-    selectedIDs.value = []
+    await Promise.all(selectedRows.value.map((item) => request(`/api/accounts/${item.id}`, { method: 'DELETE' })))
+    selectedRows.value = []
     message.value = '批量删除成功'
     await loadAccounts()
   } catch (err) {
@@ -728,58 +768,25 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.accounts-topbar {
-  gap: 16px;
+.account-dialog-card {
+  width: min(920px, calc(100vw - 24px));
+  max-width: 100%;
+  border-radius: 24px;
 }
 
-.account-modal-card {
-  width: min(820px, calc(100vw - 32px));
+:deep(.q-table__top) {
+  padding: 20px;
 }
 
-.account-form-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.form-block {
-  display: grid;
-  gap: 8px;
-}
-
-.form-block span {
+:deep(.q-table thead th) {
+  color: #475569;
   font-size: 13px;
-  color: #667085;
-}
-
-.span-2 {
-  grid-column: span 2;
-}
-
-.oauth-panel,
-.import-help {
-  display: grid;
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 16px;
-  background: rgba(248, 250, 252, 0.9);
-}
-
-.import-help p {
-  margin: 0;
-}
-
-.import-textarea {
-  min-height: 220px;
-  resize: vertical;
+  font-weight: 700;
 }
 
 @media (max-width: 860px) {
-  .account-form-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .span-2 {
-    grid-column: span 1;
+  .account-dialog-card {
+    width: calc(100vw - 16px);
   }
 }
 </style>
