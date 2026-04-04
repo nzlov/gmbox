@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/textproto"
 	"os"
@@ -202,21 +203,186 @@ func probe(ctx context.Context, host string, port int, useTLS bool) error {
 	return conn.Close()
 }
 
-// GetMessageDetail 读取邮件详情、正文与附件信息，供前端详情页复用。
-func (s *Service) GetMessageDetail(messageID uint) (*model.Message, *model.MessageBody, []model.Attachment, error) {
+// GetMessageDetail 读取邮件详情，并在正文尚未抓取时按需回源补齐。
+func (s *Service) GetMessageDetail(ctx context.Context, messageID uint) (*model.Message, *model.MessageBody, []model.Attachment, error) {
 	var message model.Message
 	if err := s.db.First(&message, messageID).Error; err != nil {
 		return nil, nil, nil, err
 	}
 	var body model.MessageBody
-	if err := s.db.Where("message_id = ?", message.Model.ID).First(&body).Error; err != nil && err != gorm.ErrRecordNotFound {
-		return nil, nil, nil, err
+	bodyErr := s.db.Where("message_id = ?", message.Model.ID).First(&body).Error
+	if bodyErr != nil && bodyErr != gorm.ErrRecordNotFound {
+		return nil, nil, nil, bodyErr
+	}
+	if shouldFetchMessageBody(bodyErr, &body, &message) {
+		if err := s.fetchAndStoreMessageBody(ctx, &message, &body, bodyErr == gorm.ErrRecordNotFound); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	var attachments []model.Attachment
 	if err := s.db.Where("message_id = ?", message.Model.ID).Order("id asc").Find(&attachments).Error; err != nil {
 		return nil, nil, nil, err
 	}
 	return &message, &body, attachments, nil
+}
+
+// fetchAndStoreMessageBody 在首次查看详情时回源抓取完整正文，并写回本地缓存。
+func (s *Service) fetchAndStoreMessageBody(ctx context.Context, message *model.Message, body *model.MessageBody, create bool) error {
+	if message == nil || body == nil {
+		return fmt.Errorf("邮件详情参数不合法")
+	}
+	var account model.MailAccount
+	if err := s.db.First(&account, message.AccountID).Error; err != nil {
+		return err
+	}
+	parsed, err := s.fetchMessageBodyFromRemote(ctx, account, *message)
+	if err != nil {
+		return err
+	}
+	body.MessageID = message.Model.ID
+	body.TextBody = parsed.TextBody
+	body.HTMLBody = parsed.HTMLBody
+	body.BodyFetched = true
+	if create {
+		return s.db.Create(body).Error
+	}
+	return s.db.Save(body).Error
+}
+
+// shouldFetchMessageBody 根据缓存状态判断是否需要回源抓取正文，并兼容历史没有 BodyFetched 标记的数据。
+func shouldFetchMessageBody(bodyErr error, body *model.MessageBody, message *model.Message) bool {
+	if bodyErr == gorm.ErrRecordNotFound {
+		return true
+	}
+	if body == nil {
+		return true
+	}
+	if body.BodyFetched {
+		return false
+	}
+	if bodyLooksFetched(body, message) {
+		return false
+	}
+	return true
+}
+
+// bodyLooksFetched 用已有正文内容反推历史记录是否已缓存完整正文，避免升级后误触发回源。
+func bodyLooksFetched(body *model.MessageBody, message *model.Message) bool {
+	if body == nil {
+		return false
+	}
+	if strings.TrimSpace(body.HTMLBody) != "" {
+		return true
+	}
+	textBody := strings.TrimSpace(body.TextBody)
+	if textBody == "" {
+		return false
+	}
+	if message == nil {
+		return true
+	}
+	return textBody != strings.TrimSpace(message.Snippet)
+}
+
+// fetchMessageBodyFromRemote 按协议回源抓取单封邮件正文，避免列表同步时强制下载全部正文。
+func (s *Service) fetchMessageBodyFromRemote(ctx context.Context, account model.MailAccount, message model.Message) (*parsedMessage, error) {
+	if account.IncomingProtocol == "imap" {
+		return s.fetchIMAPMessageBody(ctx, account, message)
+	}
+	if account.IncomingProtocol == "pop3" {
+		return s.fetchPOP3MessageBody(ctx, account, message)
+	}
+	return nil, fmt.Errorf("当前邮箱协议不支持抓取邮件正文")
+}
+
+// fetchIMAPMessageBody 通过 UID 抓取单封 IMAP 邮件的完整 RFC822 内容。
+func (s *Service) fetchIMAPMessageBody(ctx context.Context, account model.MailAccount, message model.Message) (*parsedMessage, error) {
+	if message.UID == 0 {
+		return nil, fmt.Errorf("当前邮件缺少 IMAP UID，无法抓取正文")
+	}
+	password, err := s.ResolveAuthSecret(ctx, &account)
+	if err != nil {
+		return nil, err
+	}
+	client, err := dialIMAP(account, password)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout()
+	if _, err := client.Select(message.Folder, false); err != nil {
+		return nil, fmt.Errorf("选择文件夹 %s 失败: %w", message.Folder, err)
+	}
+	section := &imap.BodySectionName{}
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, imap.FetchFlags, imap.FetchInternalDate, section.FetchItem()}
+	ch := make(chan *imap.Message, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- client.UidFetch(newUIDSet(message.UID), items, ch)
+	}()
+	var fetched *parsedMessage
+	for msg := range ch {
+		if msg == nil {
+			continue
+		}
+		rawBody := msg.GetBody(section)
+		if rawBody == nil {
+			continue
+		}
+		raw, err := io.ReadAll(rawBody)
+		if err != nil {
+			return nil, fmt.Errorf("读取 IMAP 正文失败: %w", err)
+		}
+		parsed, err := parseRawMessage(raw)
+		if err != nil {
+			return nil, err
+		}
+		parsed.enrichFromEnvelope(msg.Envelope, msg.Flags)
+		if parsed.SentAt.IsZero() {
+			parsed.SentAt = msg.InternalDate
+		}
+		fetched = parsed
+	}
+	if err := <-done; err != nil {
+		return nil, fmt.Errorf("抓取邮件正文失败: %w", err)
+	}
+	if fetched == nil {
+		return nil, fmt.Errorf("未找到指定 IMAP 邮件正文")
+	}
+	return fetched, nil
+}
+
+// fetchPOP3MessageBody 通过 UIDL 定位并抓取单封 POP3 邮件正文。
+func (s *Service) fetchPOP3MessageBody(ctx context.Context, account model.MailAccount, message model.Message) (*parsedMessage, error) {
+	if strings.TrimSpace(message.POP3UIDL) == "" {
+		return nil, fmt.Errorf("当前邮件缺少 POP3 UIDL，无法抓取正文")
+	}
+	password, err := s.ResolveAuthSecret(ctx, &account)
+	if err != nil {
+		return nil, err
+	}
+	client, err := dialPOP3(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	defer client.close()
+	if err := client.auth(account.Username, password); err != nil {
+		return nil, err
+	}
+	entries, err := client.uidlAll()
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry.uidl != message.POP3UIDL {
+			continue
+		}
+		raw, err := client.retr(entry.number)
+		if err != nil {
+			return nil, err
+		}
+		return parseRawMessage(raw)
+	}
+	return nil, fmt.Errorf("未找到指定 POP3 邮件正文")
 }
 
 // ListMailboxes 返回指定账户下已同步的文件夹，便于前端渲染目录树。

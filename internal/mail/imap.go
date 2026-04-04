@@ -283,9 +283,11 @@ func (s *Service) upsertMessage(account model.MailAccount, folder string, uid ui
 	if fetchBody {
 		body.TextBody = parsed.TextBody
 		body.HTMLBody = parsed.HTMLBody
-	} else {
+		body.BodyFetched = true
+	} else if bodyErr == gorm.ErrRecordNotFound || !body.BodyFetched {
 		body.TextBody = parsed.Snippet
 		body.HTMLBody = ""
+		body.BodyFetched = false
 	}
 	if bodyErr == gorm.ErrRecordNotFound {
 		if err := s.db.Create(&body).Error; err != nil {

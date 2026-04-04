@@ -77,12 +77,13 @@ type Message struct {
 	SentAt        time.Time `gorm:"index" json:"sent_at"`
 }
 
-// MessageBody 保存邮件正文，便于后续懒加载扩展。
+// MessageBody 保存邮件正文，并记录是否已经抓取过完整正文。
 type MessageBody struct {
 	utilsdb.Model
-	MessageID uint   `gorm:"uniqueIndex;not null" json:"message_id"`
-	TextBody  string `gorm:"type:text" json:"text_body"`
-	HTMLBody  string `gorm:"type:text" json:"html_body"`
+	MessageID   uint   `gorm:"uniqueIndex;not null" json:"message_id"`
+	TextBody    string `gorm:"type:text" json:"text_body"`
+	HTMLBody    string `gorm:"type:text" json:"html_body"`
+	BodyFetched bool   `json:"body_fetched"`
 }
 
 // Attachment 保存附件元信息。

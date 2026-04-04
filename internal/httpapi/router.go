@@ -465,9 +465,13 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			c.JSON(http.StatusBadRequest, gin.H{"message": "邮件 ID 不合法"})
 			return
 		}
-		message, body, attachments, err := app.Mailer.GetMessageDetail(uint(id))
+		message, body, attachments, err := app.Mailer.GetMessageDetail(c.Request.Context(), uint(id))
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"message": "邮件不存在"})
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"message": "邮件不存在"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": message, "body": body, "attachments": attachments})
