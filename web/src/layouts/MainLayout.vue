@@ -48,7 +48,7 @@
       <router-view />
     </q-page-container>
 
-    <q-dialog v-model="showThemeDialog">
+    <q-dialog v-model="showThemeDialog" @hide="handleThemeDialogHide">
       <q-card class="full-width" style="max-width: 720px">
         <q-card-section class="row items-start justify-between">
           <div>
@@ -84,13 +84,37 @@
               <q-select v-model="draftTheme.theme_mode" outlined emit-value map-options :options="themeModeOptions" label="主题模式" />
             </div>
             <div class="col-12 col-md-4">
-              <q-input v-model="draftTheme.primary_color" outlined label="主色" />
+              <q-input v-model="draftTheme.primary_color" outlined label="主色">
+                <template #append>
+                  <q-icon name="colorize" class="cursor-pointer">
+                    <q-popup-proxy cover transition-show="scale" transition-hide="scale">
+                      <q-color v-model="draftTheme.primary_color" format-model="hex" />
+                    </q-popup-proxy>
+                  </q-icon>
+                </template>
+              </q-input>
             </div>
             <div class="col-12 col-md-4">
-              <q-input v-model="draftTheme.secondary_color" outlined label="辅助色" />
+              <q-input v-model="draftTheme.secondary_color" outlined label="辅助色">
+                <template #append>
+                  <q-icon name="colorize" class="cursor-pointer">
+                    <q-popup-proxy cover transition-show="scale" transition-hide="scale">
+                      <q-color v-model="draftTheme.secondary_color" format-model="hex" />
+                    </q-popup-proxy>
+                  </q-icon>
+                </template>
+              </q-input>
             </div>
             <div class="col-12 col-md-4">
-              <q-input v-model="draftTheme.accent_color" outlined label="强调色" />
+              <q-input v-model="draftTheme.accent_color" outlined label="强调色">
+                <template #append>
+                  <q-icon name="colorize" class="cursor-pointer">
+                    <q-popup-proxy cover transition-show="scale" transition-hide="scale">
+                      <q-color v-model="draftTheme.accent_color" format-model="hex" />
+                    </q-popup-proxy>
+                  </q-icon>
+                </template>
+              </q-input>
             </div>
           </div>
         </q-card-section>
@@ -119,6 +143,10 @@ const $q = useQuasar()
 const drawerOpen = ref(true)
 const showThemeDialog = ref(false)
 const draftTheme = reactive<ThemePreference>(defaultThemePreference())
+const committedTheme = reactive<ThemePreference>({ ...themeState })
+const themeSaveCommitted = ref(false)
+const themeDraftDirty = ref(false)
+const syncingThemeDraft = ref(false)
 const presets = themePresets
 const themeModeOptions = [
   { label: '浅色', value: 'light' },
@@ -173,13 +201,36 @@ function applyPreset(name: string) {
   Object.assign(draftTheme, preset)
 }
 
+// handleThemeDialogHide 在未保存关闭弹窗时恢复原主题，避免预览状态污染全局界面。
+function handleThemeDialogHide() {
+  if (themeSaveCommitted.value) {
+    themeSaveCommitted.value = false
+    themeDraftDirty.value = false
+    return
+  }
+  syncingThemeDraft.value = true
+  Object.assign(draftTheme, committedTheme)
+  syncingThemeDraft.value = false
+  themeDraftDirty.value = false
+  applyThemePreference(committedTheme)
+}
+
 async function loadTheme() {
   try {
     const response = await request<ThemePreference>('/api/preferences/theme')
-    Object.assign(draftTheme, response)
-    applyThemePreference(response)
+    Object.assign(committedTheme, response)
+    if (!showThemeDialog.value || !themeDraftDirty.value) {
+      syncingThemeDraft.value = true
+      Object.assign(draftTheme, response)
+      syncingThemeDraft.value = false
+      applyThemePreference(response)
+    }
   } catch {
-    applyThemePreference(draftTheme)
+    Object.assign(committedTheme, themeState)
+    syncingThemeDraft.value = true
+    Object.assign(draftTheme, committedTheme)
+    syncingThemeDraft.value = false
+    applyThemePreference(committedTheme)
   }
 }
 
@@ -188,8 +239,13 @@ async function saveTheme() {
     method: 'PUT',
     body: JSON.stringify(draftTheme),
   })
+  themeSaveCommitted.value = true
+  themeDraftDirty.value = false
   applyThemePreference(response)
+  Object.assign(committedTheme, response)
+  syncingThemeDraft.value = true
   Object.assign(draftTheme, response)
+  syncingThemeDraft.value = false
   showThemeDialog.value = false
 }
 
@@ -197,8 +253,22 @@ watch(showThemeDialog, (value) => {
   if (!value) {
     return
   }
-  Object.assign(draftTheme, themeState)
+  themeSaveCommitted.value = false
+  themeDraftDirty.value = false
+  syncingThemeDraft.value = true
+  Object.assign(draftTheme, committedTheme)
+  syncingThemeDraft.value = false
 })
+
+watch(draftTheme, (value) => {
+  if (!showThemeDialog.value) {
+    return
+  }
+  if (!syncingThemeDraft.value) {
+    themeDraftDirty.value = true
+  }
+  applyThemePreference(value, { persist: false })
+}, { deep: true })
 
 void loadTheme()
 </script>
@@ -210,6 +280,7 @@ void loadTheme()
 
 .theme-option-active {
   border-color: var(--gmbox-primary, #2563eb);
+  box-shadow: inset 0 0 0 2px var(--gmbox-primary, #2563eb);
   transform: translateY(-1px);
 }
 

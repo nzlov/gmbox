@@ -394,10 +394,10 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 
 	protected.GET("/contacts", func(c *gin.Context) {
 		type contactItem struct {
-			Address      string    `json:"address"`
-			Name         string    `json:"name"`
-			LatestSentAt time.Time `json:"latest_sent_at"`
-			Total        int64     `json:"total"`
+			Address      string           `json:"address"`
+			Name         string           `json:"name"`
+			LatestSentAt contactTimestamp `json:"latest_sent_at"`
+			Total        int64            `json:"total"`
 		}
 
 		page, pageSize := parsePageParams(c, app.Config.Mail.PageSize)
@@ -591,6 +591,30 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		}
 		c.JSON(http.StatusOK, gin.H{"items": logs, "total": total, "page": page, "page_size": pageSize})
 	})
+}
+
+// contactTimestamp 兼容不同数据库驱动对聚合时间列返回 string 或 time.Time 的差异。
+type contactTimestamp string
+
+// Scan 统一把联系人最近发信时间转换为字符串，避免聚合列在不同驱动下扫描失败。
+func (t *contactTimestamp) Scan(value any) error {
+	if value == nil {
+		*t = ""
+		return nil
+	}
+	switch typed := value.(type) {
+	case time.Time:
+		*t = contactTimestamp(typed.UTC().Format(time.RFC3339Nano))
+		return nil
+	case []byte:
+		*t = contactTimestamp(strings.TrimSpace(string(typed)))
+		return nil
+	case string:
+		*t = contactTimestamp(strings.TrimSpace(typed))
+		return nil
+	default:
+		return fmt.Errorf("不支持的联系人时间类型: %T", value)
+	}
 }
 
 // registerFrontend 让非 API 请求统一交给前端路由处理。

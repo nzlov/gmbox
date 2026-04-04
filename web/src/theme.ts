@@ -13,8 +13,9 @@ export const themePresets: Array<{ name: string; label: string; theme_mode: 'lig
 
 export const themeState = reactive<ThemePreference>(loadStoredTheme())
 
-// applyThemePreference 统一把主题偏好映射到 Quasar 品牌色和深色模式，避免各页面各自设置造成闪烁。
-export function applyThemePreference(preference: ThemePreference) {
+// applyThemePreference 统一把主题偏好映射到 Quasar 品牌色和深色模式，预览时允许跳过本地持久化。
+export function applyThemePreference(preference: ThemePreference, options: { persist?: boolean } = {}) {
+	const { persist = true } = options
   themeState.theme_name = preference.theme_name
   themeState.theme_mode = preference.theme_mode
   themeState.primary_color = preference.primary_color
@@ -27,7 +28,9 @@ export function applyThemePreference(preference: ThemePreference) {
   document.documentElement.style.setProperty('--gmbox-primary', preference.primary_color)
   document.documentElement.style.setProperty('--gmbox-secondary', preference.secondary_color)
   document.documentElement.style.setProperty('--gmbox-accent', preference.accent_color)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(themeState))
+  if (persist) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(themeState))
+  }
 }
 
 // loadStoredTheme 优先读取本地缓存，避免登录后接口返回前出现主题闪动。
