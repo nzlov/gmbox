@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/emersion/go-imap/v2"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
@@ -183,5 +184,19 @@ func TestIMAPOAuthMechanismOrderForGenericProvider(t *testing.T) {
 	}
 	if order[1] != imapOAuthMechXOAUTH2 {
 		t.Fatalf("order[1] = %q, want %q", order[1], imapOAuthMechXOAUTH2)
+	}
+}
+
+// TestSelectIMAPOAuthMechanismsPrefersDeclaredXOAUTH2 确保服务端声明 XOAUTH2 时优先尝试它。
+func TestSelectIMAPOAuthMechanismsPrefersDeclaredXOAUTH2(t *testing.T) {
+	selected := selectIMAPOAuthMechanisms(imap.CapSet{imap.AuthCap(imapOAuthMechXOAUTH2): {}}, model.MailAccount{Provider: "outlook"})
+	if len(selected) != 2 {
+		t.Fatalf("len(selected) = %d, want 2", len(selected))
+	}
+	if selected[0] != imapOAuthMechXOAUTH2 {
+		t.Fatalf("selected[0] = %q, want %q", selected[0], imapOAuthMechXOAUTH2)
+	}
+	if selected[1] != imapOAuthMechOAuthBearer {
+		t.Fatalf("selected[1] = %q, want %q", selected[1], imapOAuthMechOAuthBearer)
 	}
 }

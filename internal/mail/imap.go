@@ -255,24 +255,7 @@ func dialIMAPOAuth(account model.MailAccount, username string, token string) (*i
 
 // buildIMAPOAuthAttempts 先尊重服务端能力声明，再补一个兜底顺序避免少量服务端声明不完整。
 func buildIMAPOAuthAttempts(client *imapclient.Client, account model.MailAccount, username string, token string) []imapOAuthAttempt {
-	preferredOrder := imapOAuthMechanismOrder(account)
-	orderedNames := make([]string, 0, 2)
-	appendMechanism := func(name string) {
-		for _, existing := range orderedNames {
-			if existing == name {
-				return
-			}
-		}
-		orderedNames = append(orderedNames, name)
-	}
-	for _, name := range preferredOrder {
-		if client.Caps().Has(imap.AuthCap(name)) {
-			appendMechanism(name)
-		}
-	}
-	for _, name := range preferredOrder {
-		appendMechanism(name)
-	}
+	orderedNames := selectIMAPOAuthMechanisms(client.Caps(), account)
 
 	attempts := make([]imapOAuthAttempt, 0, len(orderedNames))
 	for _, name := range orderedNames {
@@ -294,6 +277,29 @@ func buildIMAPOAuthAttempts(client *imapclient.Client, account model.MailAccount
 		}
 	}
 	return attempts
+}
+
+// selectIMAPOAuthMechanisms 优先使用服务端明确声明的 OAuth 机制，再补充未声明候选兜底，兼容少量能力声明不完整的服务端。
+func selectIMAPOAuthMechanisms(caps imap.CapSet, account model.MailAccount) []string {
+	preferredOrder := imapOAuthMechanismOrder(account)
+	orderedNames := make([]string, 0, 2)
+	appendMechanism := func(name string) {
+		for _, existing := range orderedNames {
+			if existing == name {
+				return
+			}
+		}
+		orderedNames = append(orderedNames, name)
+	}
+	for _, name := range preferredOrder {
+		if caps.Has(imap.AuthCap(name)) {
+			appendMechanism(name)
+		}
+	}
+	for _, name := range preferredOrder {
+		appendMechanism(name)
+	}
+	return orderedNames
 }
 
 // upsertMessage 根据账户和协议唯一标识保存邮件，避免重复落库。

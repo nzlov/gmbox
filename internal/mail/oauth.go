@@ -137,7 +137,7 @@ func (s *Service) UpsertMicrosoftOAuthAccountWithPKCE(ctx context.Context, code 
 	}
 	preset := LookupProviderPreset("outlook")
 	var account model.MailAccount
-	err = s.db.Where("email = ?", mailAddress).First(&account).Error
+	err = s.db.Unscoped().Where("email = ?", mailAddress).First(&account).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
@@ -173,6 +173,10 @@ func (s *Service) UpsertMicrosoftOAuthAccountWithPKCE(ctx context.Context, code 
 	account.SMTPPort = preset.SMTPPort
 	account.UseTLS = preset.UseTLS
 	account.Enabled = true
+	if account.DeletedAt.Valid {
+		// 同邮箱被软删后重新授权时复用原记录，避免唯一索引仍占用而重复创建失败。
+		account.DeletedAt = gorm.DeletedAt{}
+	}
 	if err := s.storeOAuthToken(&account, *token); err != nil {
 		return nil, err
 	}
