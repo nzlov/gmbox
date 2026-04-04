@@ -157,3 +157,31 @@ func TestFallbackIMAPMailboxesRejectsNonOutlook(t *testing.T) {
 		t.Fatalf("err = %v, want %v", err, originalErr)
 	}
 }
+
+// TestIMAPOAuthMechanismOrderForOutlook 确保微软 IMAP 优先走更稳定的 XOAUTH2，减少 OAUTHBEARER 挑战把连接读坏的概率。
+func TestIMAPOAuthMechanismOrderForOutlook(t *testing.T) {
+	order := imapOAuthMechanismOrder(model.MailAccount{Provider: "outlook"})
+	if len(order) != 2 {
+		t.Fatalf("len(order) = %d, want 2", len(order))
+	}
+	if order[0] != imapOAuthMechXOAUTH2 {
+		t.Fatalf("order[0] = %q, want %q", order[0], imapOAuthMechXOAUTH2)
+	}
+	if order[1] != imapOAuthMechOAuthBearer {
+		t.Fatalf("order[1] = %q, want %q", order[1], imapOAuthMechOAuthBearer)
+	}
+}
+
+// TestIMAPOAuthMechanismOrderForGenericProvider 保持非微软服务商默认优先 RFC 标准机制，避免无关账号行为回归。
+func TestIMAPOAuthMechanismOrderForGenericProvider(t *testing.T) {
+	order := imapOAuthMechanismOrder(model.MailAccount{Provider: "gmail"})
+	if len(order) != 2 {
+		t.Fatalf("len(order) = %d, want 2", len(order))
+	}
+	if order[0] != imapOAuthMechOAuthBearer {
+		t.Fatalf("order[0] = %q, want %q", order[0], imapOAuthMechOAuthBearer)
+	}
+	if order[1] != imapOAuthMechXOAUTH2 {
+		t.Fatalf("order[1] = %q, want %q", order[1], imapOAuthMechXOAUTH2)
+	}
+}

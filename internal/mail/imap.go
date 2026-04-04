@@ -211,6 +211,15 @@ type imapOAuthAttempt struct {
 	auth func(*imapclient.Client) error
 }
 
+// imapOAuthMechanismOrder 为不同服务商提供更稳妥的 OAuth 机制优先级。
+// 微软 IMAP 线上兼容性以 XOAUTH2 更稳定，因此优先尝试 XOAUTH2，避免 OAUTHBEARER 失败挑战把连接读状态打坏。
+func imapOAuthMechanismOrder(account model.MailAccount) []string {
+	if normalizeProvider(account.Provider) == "outlook" {
+		return []string{imapOAuthMechXOAUTH2, imapOAuthMechOAuthBearer}
+	}
+	return []string{imapOAuthMechOAuthBearer, imapOAuthMechXOAUTH2}
+}
+
 // dialIMAPOAuth 根据服务端能力按优先级尝试 OAuth 机制，并在失败时自动重连回退。
 func dialIMAPOAuth(account model.MailAccount, username string, token string) (*imapclient.Client, error) {
 	probeClient, err := openIMAPClient(account)
@@ -242,6 +251,7 @@ func dialIMAPOAuth(account model.MailAccount, username string, token string) (*i
 
 // buildIMAPOAuthAttempts 先尊重服务端能力声明，再补一个兜底顺序避免少量服务端声明不完整。
 func buildIMAPOAuthAttempts(client *imapclient.Client, account model.MailAccount, username string, token string) []imapOAuthAttempt {
+	preferredOrder := imapOAuthMechanismOrder(account)
 	orderedNames := make([]string, 0, 2)
 	appendMechanism := func(name string) {
 		for _, existing := range orderedNames {
@@ -251,14 +261,14 @@ func buildIMAPOAuthAttempts(client *imapclient.Client, account model.MailAccount
 		}
 		orderedNames = append(orderedNames, name)
 	}
-	if supported, err := client.SupportAuth(imapOAuthMechOAuthBearer); err == nil && supported {
-		appendMechanism(imapOAuthMechOAuthBearer)
+	for _, name := range preferredOrder {
+		if supported, err := client.SupportAuth(name); err == nil && supported {
+			appendMechanism(name)
+		}
 	}
-	if supported, err := client.SupportAuth(imapOAuthMechXOAUTH2); err == nil && supported {
-		appendMechanism(imapOAuthMechXOAUTH2)
+	for _, name := range preferredOrder {
+		appendMechanism(name)
 	}
-	appendMechanism(imapOAuthMechOAuthBearer)
-	appendMechanism(imapOAuthMechXOAUTH2)
 
 	attempts := make([]imapOAuthAttempt, 0, len(orderedNames))
 	for _, name := range orderedNames {
