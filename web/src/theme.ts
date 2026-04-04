@@ -4,7 +4,16 @@ import type { ThemePreference } from './api'
 
 const STORAGE_KEY = 'gmbox-theme-preference'
 
-export const themePresets: Array<{ name: string; label: string; theme_mode: 'light' | 'dark'; primary_color: string; secondary_color: string; accent_color: string }> = [
+export interface ThemePreset {
+  name: string
+  label: string
+  theme_mode: 'light' | 'dark'
+  primary_color: string
+  secondary_color: string
+  accent_color: string
+}
+
+export const themePresets: ThemePreset[] = [
   { name: 'classic_blue', label: '经典蓝', theme_mode: 'light', primary_color: '#2563eb', secondary_color: '#7c3aed', accent_color: '#06b6d4' },
   { name: 'forest_green', label: '松林绿', theme_mode: 'light', primary_color: '#166534', secondary_color: '#0f766e', accent_color: '#65a30d' },
   { name: 'sunset_orange', label: '晚霞橙', theme_mode: 'light', primary_color: '#ea580c', secondary_color: '#db2777', accent_color: '#d97706' },

@@ -63,7 +63,7 @@
         <q-card-section>
           <div class="row q-col-gutter-md">
             <div v-for="preset in presets" :key="preset.name" class="col-12 col-md-6">
-              <q-card bordered flat class="theme-option cursor-pointer" :class="draftTheme.theme_name === preset.name ? 'theme-option-active' : ''" @click="applyPreset(preset.name)">
+              <q-card bordered flat class="theme-option cursor-pointer" :class="isPresetActive(preset) ? 'theme-option-active' : ''" @click="applyPreset(preset.name)">
                 <q-card-section>
                   <div class="row items-center justify-between">
                     <div class="text-subtitle1 text-weight-medium">{{ preset.label }}</div>
@@ -133,7 +133,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuasar } from 'quasar'
 import { request, type ThemePreference } from '@/api'
-import { applyThemePreference, defaultThemePreference, themePresets, themeState } from '@/theme'
+import { applyThemePreference, defaultThemePreference, themePresets, themeState, type ThemePreset } from '@/theme'
 
 type NavKey = 'aggregated' | 'contacts' | 'inbox' | 'accounts' | 'sync-logs'
 
@@ -199,6 +199,15 @@ function applyPreset(name: string) {
     return
   }
   Object.assign(draftTheme, preset)
+}
+
+// isPresetActive 按完整主题配置判断当前激活卡片，避免颜色或模式改动后高亮状态滞留在旧主题名上。
+function isPresetActive(preset: ThemePreset) {
+  return draftTheme.theme_name === preset.name
+    && draftTheme.theme_mode === preset.theme_mode
+    && draftTheme.primary_color === preset.primary_color
+    && draftTheme.secondary_color === preset.secondary_color
+    && draftTheme.accent_color === preset.accent_color
 }
 
 // handleThemeDialogHide 在未保存关闭弹窗时恢复原主题，避免预览状态污染全局界面。
