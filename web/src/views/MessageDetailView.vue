@@ -87,6 +87,7 @@ import DOMPurify from 'dompurify'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { request, type AttachmentItem, type MailboxItem, type MessageDetailResponse, type MessageItem } from '@/api'
+import { extractMailHtml, extractMailText } from '@/utils/mailBody'
 
 const route = useRoute()
 const router = useRouter()
@@ -115,7 +116,7 @@ const currentMessage = computed<MessageItem>(() =>
 )
 const currentAttachments = computed<AttachmentItem[]>(() => detail.value?.attachments ?? [])
 const sanitizedHtml = computed(() => {
-  const html = detail.value?.body?.html_body?.trim()
+  const html = extractMailHtml(detail.value?.body?.html_body ?? '')
   if (!html) {
     return ''
   }
@@ -140,7 +141,7 @@ const safeBody = computed(() => {
   if (textBody) {
     return textBody
   }
-  const htmlBody = detail.value.body?.html_body?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const htmlBody = extractMailText(detail.value.body?.html_body ?? '')
   if (htmlBody) {
     return htmlBody
   }

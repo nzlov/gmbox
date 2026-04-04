@@ -21,11 +21,11 @@
 
       <q-card-section class="row items-center q-col-gutter-sm">
         <div class="col row q-gutter-xs">
-          <q-btn flat round dense color="primary" :icon="message.is_read ? 'mark_email_unread' : 'mark_email_read'" @click="toggleRead" />
-          <q-btn flat round dense color="negative" icon="delete" @click="deleteMessage" />
-          <q-btn flat round dense color="secondary" :icon="showRemoteImages ? 'hide_image' : 'image'" @click="showRemoteImages = !showRemoteImages" />
-          <q-btn flat round dense color="secondary" icon="drive_file_move" @click="openMoveDialog" />
-          <q-btn v-if="showReply" flat round dense color="primary" icon="reply" @click="emitReply" />
+          <q-btn flat round dense color="primary" :icon="message.is_read ? 'mark_email_unread' : 'mark_email_read'" @click="toggleRead"><q-tooltip>{{ message.is_read ? '标记为未读' : '标记为已读' }}</q-tooltip></q-btn>
+          <q-btn flat round dense color="negative" icon="delete" @click="deleteMessage"><q-tooltip>删除邮件</q-tooltip></q-btn>
+          <q-btn flat round dense color="secondary" :icon="showRemoteImages ? 'hide_image' : 'image'" @click="showRemoteImages = !showRemoteImages"><q-tooltip>{{ showRemoteImages ? '隐藏远程图片' : '显示远程图片' }}</q-tooltip></q-btn>
+          <q-btn flat round dense color="secondary" icon="drive_file_move" @click="openMoveDialog"><q-tooltip>移动邮件</q-tooltip></q-btn>
+          <q-btn v-if="showReply" flat round dense color="primary" icon="reply" @click="emitReply"><q-tooltip>回复邮件</q-tooltip></q-btn>
         </div>
       </q-card-section>
 
@@ -80,6 +80,7 @@
 import DOMPurify from 'dompurify'
 import { computed, onMounted, ref, watch } from 'vue'
 import { request, type MailboxItem, type MessageDetailResponse, type MessageItem } from '@/api'
+import { extractMailHtml, extractMailText } from '@/utils/mailBody'
 
 const props = withDefaults(defineProps<{
   message: MessageItem
@@ -118,14 +119,14 @@ const safeBody = computed(() => {
   if (textBody) {
     return textBody
   }
-  const htmlBody = detail.value?.body?.html_body?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const htmlBody = extractMailText(detail.value?.body?.html_body ?? '')
   if (htmlBody) {
     return htmlBody
   }
   return message.value.snippet || ''
 })
 const sanitizedHtml = computed(() => {
-  const html = detail.value?.body?.html_body?.trim()
+  const html = extractMailHtml(detail.value?.body?.html_body ?? '')
   if (!html) {
     return ''
   }

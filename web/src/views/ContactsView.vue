@@ -12,11 +12,6 @@
         </q-card-section>
 
         <q-list bordered separator>
-          <q-item clickable :active="selectedAddress === ''" active-class="bg-primary text-white" @click="selectContact('')">
-            <q-item-section>
-              <q-item-label>全部信件</q-item-label>
-            </q-item-section>
-          </q-item>
           <q-item v-for="item in contacts" :key="item.address" clickable :active="selectedAddress === item.address" active-class="bg-primary text-white" @click="selectContact(item.address)">
             <q-item-section>
               <q-item-label>{{ item.name || item.address }}</q-item-label>
@@ -29,8 +24,8 @@
       <q-card bordered class="col-12 col-lg">
         <q-card-section class="row items-center justify-between q-col-gutter-md">
           <div class="col">
-            <div class="text-h6 text-weight-bold">{{ selectedAddress ? selectedContactName : '全部信件' }}</div>
-            <div class="text-body2 text-grey-7">{{ selectedAddress || '按时间倒序显示所有联系人往来邮件' }}</div>
+            <div class="text-h6 text-weight-bold">{{ selectedAddress ? selectedContactName : '联系人邮件' }}</div>
+            <div class="text-body2 text-grey-7">{{ selectedAddress || '请选择左侧联系人后查看邮件列表' }}</div>
           </div>
         </q-card-section>
 
@@ -38,8 +33,13 @@
 
         <q-card-section>
           <q-banner v-if="error" rounded dense class="bg-red-1 text-negative q-mb-md">{{ error }}</q-banner>
-          <div v-if="messages.length > 0">
+          <div v-if="selectedAddress && messages.length > 0">
             <MessageThreadCard v-for="item in messages" :key="item.id" :message="item" :initial-expanded="true" :collapsible="false" hide-sender show-reply :show-folder="!selectedAddress" @changed="loadMessages(page)" @deleted="removeMessage(item.id)" @reply="openReplyDialog" />
+          </div>
+          <div v-else-if="!selectedAddress" class="column items-center justify-center text-center q-py-xl text-grey-7">
+            <q-icon name="groups" size="56px" color="grey-5" />
+            <div class="text-subtitle1 q-mt-md">请选择联系人</div>
+            <div class="text-body2 q-mt-sm">仅在选择联系人后加载并显示邮件列表</div>
           </div>
           <div v-else class="column items-center justify-center text-center q-py-xl text-grey-7">
             <q-icon name="group_off" size="56px" color="grey-5" />
@@ -50,11 +50,11 @@
         <q-separator />
 
         <q-card-section class="row items-center justify-center q-gutter-sm">
-          <q-btn outline color="primary" no-caps :disable="page <= 1" label="上一页" @click="loadMessages(page - 1)" />
-          <q-select v-model="pageSize" outlined dense emit-value map-options :options="pageSizeOptions" style="min-width: 128px" @update:model-value="loadMessages(1)" />
+          <q-btn outline color="primary" no-caps :disable="!selectedAddress || page <= 1" label="上一页" @click="loadMessages(page - 1)" />
+          <q-select v-model="pageSize" outlined dense emit-value map-options :options="pageSizeOptions" style="min-width: 128px" :disable="!selectedAddress" @update:model-value="loadMessages(1)" />
           <div class="text-body2 text-grey-7">第 {{ page }} / {{ totalPages }} 页</div>
           <div class="text-body2 text-grey-7">共 {{ total }} 封</div>
-          <q-btn outline color="primary" no-caps :disable="page >= totalPages" label="下一页" @click="loadMessages(page + 1)" />
+          <q-btn outline color="primary" no-caps :disable="!selectedAddress || page >= totalPages" label="下一页" @click="loadMessages(page + 1)" />
         </q-card-section>
       </q-card>
     </div>
@@ -107,11 +107,18 @@ async function loadContacts() {
 }
 
 async function loadMessages(nextPage = page.value) {
+  if (!selectedAddress.value) {
+    error.value = ''
+    messages.value = []
+    total.value = 0
+    page.value = 1
+    return
+  }
   error.value = ''
   try {
     page.value = nextPage
     const params = new URLSearchParams({ page: String(page.value), page_size: String(pageSize.value) })
-    const endpoint = selectedAddress.value ? `/api/contact-messages?address=${encodeURIComponent(selectedAddress.value)}&${params.toString()}` : `/api/contact-messages?${params.toString()}`
+    const endpoint = `/api/contact-messages?address=${encodeURIComponent(selectedAddress.value)}&${params.toString()}`
     const response = await request<MessageListResponse>(endpoint)
     messages.value = response.items
     total.value = response.total
