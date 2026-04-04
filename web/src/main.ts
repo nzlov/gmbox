@@ -6,8 +6,11 @@ import router from './router'
 import 'quasar/dist/quasar.css'
 import '@quasar/extras/material-icons/material-icons.css'
 import './styles.css'
+import { applyThemePreference, themeState } from './theme'
 
 // createApp 负责挂载前端入口并注入路由。
+applyThemePreference(themeState)
+
 createApp(App)
   .use(router)
   .use(Quasar, {

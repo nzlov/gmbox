@@ -89,6 +89,7 @@ func (a *App) Close() {
 func migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&model.User{},
+		&model.UserPreference{},
 		&model.MailAccount{},
 		&model.Mailbox{},
 		&model.Message{},

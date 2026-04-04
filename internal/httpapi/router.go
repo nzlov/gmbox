@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	stdmail "net/mail"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -102,11 +105,64 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 
 	protected.GET("/accounts", func(c *gin.Context) {
 		var accounts []model.MailAccount
-		if err := app.DB.Order("id desc").Find(&accounts).Error; err != nil {
+		query := app.DB.Order("id desc")
+		if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+			like := "%" + keyword + "%"
+			query = query.Where("name LIKE ? OR email LIKE ? OR provider_name LIKE ?", like, like, like)
+		}
+		if err := query.Find(&accounts).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询邮箱失败"})
 			return
 		}
 		c.JSON(http.StatusOK, accounts)
+	})
+
+	protected.GET("/preferences/theme", func(c *gin.Context) {
+		claims := auth.MustClaims(c)
+		preference, err := loadThemePreference(app.DB, claims.UserID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询主题设置失败"})
+			return
+		}
+		c.JSON(http.StatusOK, preference)
+	})
+
+	protected.PUT("/preferences/theme", func(c *gin.Context) {
+		claims := auth.MustClaims(c)
+		var req struct {
+			ThemeName      string `json:"theme_name" binding:"required"`
+			ThemeMode      string `json:"theme_mode" binding:"required"`
+			PrimaryColor   string `json:"primary_color" binding:"required"`
+			SecondaryColor string `json:"secondary_color" binding:"required"`
+			AccentColor    string `json:"accent_color" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
+			return
+		}
+		if req.ThemeMode != "light" && req.ThemeMode != "dark" {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "主题模式仅支持 light 或 dark"})
+			return
+		}
+		if !isHexColor(req.PrimaryColor) || !isHexColor(req.SecondaryColor) || !isHexColor(req.AccentColor) {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "主题颜色格式不合法"})
+			return
+		}
+		preference, err := loadThemePreference(app.DB, claims.UserID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "读取主题设置失败"})
+			return
+		}
+		preference.ThemeName = strings.TrimSpace(req.ThemeName)
+		preference.ThemeMode = req.ThemeMode
+		preference.PrimaryColor = strings.TrimSpace(req.PrimaryColor)
+		preference.SecondaryColor = strings.TrimSpace(req.SecondaryColor)
+		preference.AccentColor = strings.TrimSpace(req.AccentColor)
+		if err := app.DB.Save(preference).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "保存主题设置失败"})
+			return
+		}
+		c.JSON(http.StatusOK, preference)
 	})
 
 	protected.POST("/accounts", func(c *gin.Context) {
@@ -336,6 +392,73 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		c.JSON(http.StatusOK, mailboxes)
 	})
 
+	protected.GET("/contacts", func(c *gin.Context) {
+		type contactItem struct {
+			Address      string    `json:"address"`
+			Name         string    `json:"name"`
+			LatestSentAt time.Time `json:"latest_sent_at"`
+			Total        int64     `json:"total"`
+		}
+
+		page, pageSize := parsePageParams(c, app.Config.Mail.PageSize)
+		base := app.DB.Table("messages").
+			Select("from_address AS address, MAX(from_name) AS name, MAX(sent_at) AS latest_sent_at, COUNT(*) AS total").
+			Where("is_deleted = ? AND TRIM(from_address) <> ''", false).
+			Where("from_address NOT IN (?)", app.DB.Model(&model.MailAccount{}).Select("email")).
+			Group("from_address")
+		if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+			like := "%" + keyword + "%"
+			base = base.Where("from_address LIKE ? OR from_name LIKE ?", like, like)
+		}
+
+		var total int64
+		if err := app.DB.Table("(?) AS contacts", base).Count(&total).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "统计联系人失败"})
+			return
+		}
+
+		var contacts []contactItem
+		if err := app.DB.Table("(?) AS contacts", base).
+			Order("latest_sent_at desc, address asc").
+			Offset((page - 1) * pageSize).
+			Limit(pageSize).
+			Find(&contacts).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询联系人失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": contacts, "total": total, "page": page, "page_size": pageSize})
+	})
+
+	protected.GET("/contact-messages", func(c *gin.Context) {
+		address := strings.TrimSpace(c.Query("address"))
+		page, pageSize := parsePageParams(c, app.Config.Mail.PageSize)
+		query := app.DB.Model(&model.Message{}).Where("is_deleted = ?", false)
+		if address != "" {
+			query = query.Where("from_address = ? OR to_addresses LIKE ?", address, "%@%")
+		}
+
+		var candidates []model.Message
+		if err := query.Order("sent_at desc, id desc").Find(&candidates).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询联系人邮件失败"})
+			return
+		}
+		messages := candidates
+		if address != "" {
+			messages = filterContactMessages(candidates, address)
+		}
+		total := int64(len(messages))
+		start := (page - 1) * pageSize
+		if start > len(messages) {
+			start = len(messages)
+		}
+		end := start + pageSize
+		if end > len(messages) {
+			end = len(messages)
+		}
+		messages = messages[start:end]
+		c.JSON(http.StatusOK, gin.H{"items": messages, "total": total, "page": page, "page_size": pageSize})
+	})
+
 	protected.GET("/messages/:id", func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
@@ -452,24 +575,21 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 
 	protected.GET("/sync-logs", func(c *gin.Context) {
 		var logs []model.SyncLog
-		query := app.DB.Order("started_at desc, id desc")
+		query := app.DB.Model(&model.SyncLog{}).Order("started_at desc, id desc")
 		if accountID := strings.TrimSpace(c.Query("account_id")); accountID != "" {
 			query = query.Where("account_id = ?", accountID)
 		}
-		limit := 100
-		if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
-			if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
-				if parsed > 500 {
-					parsed = 500
-				}
-				limit = parsed
-			}
+		page, pageSize := parsePageParams(c, 20)
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "统计同步日志失败"})
+			return
 		}
-		if err := query.Limit(limit).Find(&logs).Error; err != nil {
+		if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&logs).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询同步日志失败"})
 			return
 		}
-		c.JSON(http.StatusOK, logs)
+		c.JSON(http.StatusOK, gin.H{"items": logs, "total": total, "page": page, "page_size": pageSize})
 	})
 }
 
@@ -593,4 +713,72 @@ func requestBaseURL(c *gin.Context) string {
 		host = c.Request.Host
 	}
 	return fmt.Sprintf("%s://%s", scheme, host)
+}
+
+var hexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// parsePageParams 统一解析分页参数，避免各接口重复维护边界判断。
+func parsePageParams(c *gin.Context, defaultPageSize int) (int, int) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", strconv.Itoa(defaultPageSize)))
+	if pageSize < 1 {
+		pageSize = defaultPageSize
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	return page, pageSize
+}
+
+// loadThemePreference 统一兜底主题设置，避免前端首次进入时拿到空配置。
+func loadThemePreference(db *gorm.DB, userID uint) (*model.UserPreference, error) {
+	preference := &model.UserPreference{UserID: userID}
+	err := db.Where("user_id = ?", userID).First(preference).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return &model.UserPreference{
+			UserID:         userID,
+			ThemeName:      "classic_blue",
+			ThemeMode:      "light",
+			PrimaryColor:   "#2563eb",
+			SecondaryColor: "#7c3aed",
+			AccentColor:    "#06b6d4",
+		}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return preference, nil
+}
+
+// isHexColor 只允许标准十六进制颜色，避免把非法值写进主题配置后污染整个界面。
+func isHexColor(value string) bool {
+	return hexColorPattern.MatchString(strings.TrimSpace(value))
+}
+
+// filterContactMessages 对收件人列表做标准地址精确匹配，避免邮箱子串误命中无关邮件。
+func filterContactMessages(messages []model.Message, address string) []model.Message {
+	filtered := make([]model.Message, 0, len(messages))
+	for _, item := range messages {
+		if strings.EqualFold(strings.TrimSpace(item.FromAddress), address) || addressInMessageList(item.ToAddresses, address) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+// addressInMessageList 尝试按 RFC822 地址列表解析收件人字段，确保联系人筛选按完整邮箱而不是子串判断。
+func addressInMessageList(raw string, target string) bool {
+	list, err := stdmail.ParseAddressList(raw)
+	if err != nil {
+		return false
+	}
+	for _, item := range list {
+		if strings.EqualFold(strings.TrimSpace(item.Address), target) {
+			return true
+		}
+	}
+	return false
 }

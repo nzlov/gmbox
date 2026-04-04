@@ -13,7 +13,6 @@
         selection="multiple"
         :rows="accounts"
         :columns="columns"
-        :filter="tableFilter"
         :pagination="tablePagination"
         :rows-per-page-options="[10, 20, 50, 100]"
         no-data-label="暂无邮箱，请先添加。"
@@ -21,14 +20,14 @@
         <template #top>
           <div class="full-width row q-col-gutter-md items-center">
             <div class="col-12 col-xl-5">
-              <q-input v-model.trim="tableFilter" outlined dense clearable label="搜索名称、邮箱或服务商" />
+              <q-input v-model.trim="searchKeyword" outlined dense clearable label="搜索名称、邮箱或服务商" />
             </div>
-            <div class="col-12 col-xl row q-gutter-sm wrap justify-end">
-              <q-btn outline color="primary" no-caps :disable="!hasSelection" label="启用" @click="batchUpdateEnabled(true)" />
-              <q-btn outline color="primary" no-caps :disable="!hasSelection" label="禁用" @click="batchUpdateEnabled(false)" />
-              <q-btn outline color="secondary" no-caps :disable="!hasSelection" label="同步" @click="batchSync" />
-              <q-btn outline color="secondary" no-caps :disable="!hasSelection" label="测试" @click="batchTest" />
-              <q-btn outline color="negative" no-caps :disable="!hasSelection" label="删除" @click="batchDelete" />
+            <div v-if="hasSelection" class="col-12 col-xl row q-gutter-sm wrap justify-end">
+              <q-btn outline color="primary" no-caps label="启用" @click="batchUpdateEnabled(true)" />
+              <q-btn outline color="primary" no-caps label="禁用" @click="batchUpdateEnabled(false)" />
+              <q-btn outline color="secondary" no-caps label="同步" @click="batchSync" />
+              <q-btn outline color="secondary" no-caps label="测试" @click="batchTest" />
+              <q-btn outline color="negative" no-caps label="删除" @click="batchDelete" />
             </div>
           </div>
         </template>
@@ -227,19 +226,9 @@
         </q-card-section>
       </q-card>
     </q-dialog>
-
+    
     <q-page-sticky position="bottom-right" :offset="[24, 24]">
-      <q-fab color="primary" icon="add" direction="up" vertical-actions-align="right">
-        <q-tooltip>添加操作</q-tooltip>
-
-        <q-fab-action color="primary" icon="person_add" label="添加邮箱" label-position="left" @click="openCreateModal">
-          <q-tooltip>添加邮箱</q-tooltip>
-        </q-fab-action>
-
-        <q-fab-action color="secondary" icon="upload_file" label="批量导入" label-position="left" @click="openImportModal">
-          <q-tooltip>批量导入</q-tooltip>
-        </q-fab-action>
-      </q-fab>
+      <HoverActionFab primary-icon="person_add" primary-label="添加邮箱" secondary-icon="upload_file" secondary-label="批量导入" @primary="openCreateModal" @secondary="openImportModal" />
     </q-page-sticky>
   </q-page>
 </template>
@@ -247,6 +236,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import HoverActionFab from '@/components/HoverActionFab.vue'
 import {
   request,
   type AccountProvidersResponse,
@@ -293,10 +283,11 @@ const showImportModal = ref(false)
 const editingID = ref<number | null>(null)
 const selectedRows = ref<MailAccount[]>([])
 const importText = ref('')
-const tableFilter = ref('')
+const searchKeyword = ref('')
 const tablePagination = { rowsPerPage: 10 }
 const form = reactive<AccountForm>(createDefaultForm())
 let oauthPopup: Window | null = null
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const hasSelection = computed(() => selectedRows.value.length > 0)
 const currentProviderPreset = computed(() => providers.value.find((item) => item.key === form.provider) ?? null)
@@ -377,7 +368,8 @@ async function loadProviders() {
 // loadAccounts 刷新当前邮箱列表，保持页面与数据库状态一致。
 async function loadAccounts() {
   error.value = ''
-  accounts.value = await request<MailAccount[]>('/api/accounts')
+  const query = searchKeyword.value.trim() ? `?keyword=${encodeURIComponent(searchKeyword.value.trim())}` : ''
+  accounts.value = await request<MailAccount[]>(`/api/accounts${query}`)
   selectedRows.value = selectedRows.value.filter((selected) => accounts.value.some((item) => item.id === selected.id))
 }
 
@@ -852,5 +844,17 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('message', handleOAuthMessage)
   oauthPopup = null
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+  }
+})
+
+watch(searchKeyword, () => {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+  }
+  searchTimer = setTimeout(() => {
+    void loadAccounts()
+  }, 300)
 })
 </script>

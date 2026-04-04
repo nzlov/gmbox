@@ -51,6 +51,16 @@ export interface MicrosoftOAuthExchangeResponse {
   account: MailAccount
 }
 
+export interface ThemePreference {
+  id?: number
+  user_id?: number
+  theme_name: string
+  theme_mode: 'light' | 'dark'
+  primary_color: string
+  secondary_color: string
+  accent_color: string
+}
+
 export interface MessageItem {
   id: number
   account_id: number
@@ -102,6 +112,45 @@ export interface MessageDetailResponse {
   message: MessageItem
   body: MessageBody
   attachments: AttachmentItem[]
+}
+
+export interface ContactItem {
+  address: string
+  name: string
+  latest_sent_at: string
+  total: number
+}
+
+export interface ContactListResponse {
+  items: ContactItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface SyncLogItem {
+  id: number
+  account_id: number
+  account_name: string
+  account_email: string
+  trigger: string
+  protocol: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
+  new_messages: number
+  mailbox_count: number
+  success: boolean
+  retried_oauth: boolean
+  summary_message: string
+  error_message: string
+}
+
+export interface SyncLogListResponse {
+  items: SyncLogItem[]
+  total: number
+  page: number
+  page_size: number
 }
 
 // request 封装统一请求入口，确保所有页面都带上 Cookie，并归一化后端返回的主键字段。

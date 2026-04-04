@@ -32,7 +32,7 @@
             </q-item-section>
           </q-item>
           <q-item
-            v-for="mailbox in mailboxes"
+            v-for="mailbox in sortedMailboxes"
             :key="mailbox.id"
             clickable
             :active="selectedFolder === mailbox.path"
@@ -40,100 +40,64 @@
             @click="selectFolder(mailbox.path)"
           >
             <q-item-section>
-              <q-item-label>{{ mailbox.name }}</q-item-label>
-              <q-item-label caption :class="selectedFolder === mailbox.path ? 'text-white' : 'text-grey-6'">
-                {{ mailbox.role || mailbox.path }}
-              </q-item-label>
+              <q-item-label>{{ mailbox.label }}</q-item-label>
+              <q-item-label caption :class="selectedFolder === mailbox.path ? 'text-white' : 'text-grey-6'">{{ mailbox.path }}</q-item-label>
             </q-item-section>
           </q-item>
         </q-list>
       </q-card>
 
       <q-card bordered class="col-12 col-lg">
-          <q-card-section class="row q-col-gutter-md items-center">
-            <div class="col-12 col-md-6">
-              <q-input v-model.trim="keywordInput" outlined dense label="搜索主题、发件人或摘要" @keyup.enter="applyKeywordNow">
-                <template #append>
-                  <q-btn v-if="keywordInput" flat round dense icon="close" @click="clearKeyword" />
-                </template>
-              </q-input>
-            </div>
-            <div class="col-12 col-md row q-gutter-sm justify-end">
-              <q-select
-                v-model="pageSize"
-                outlined
-                dense
-                emit-value
-                map-options
-                :options="pageSizeOptions"
-                style="min-width: 128px"
-                @update:model-value="handlePageSizeChange"
-              />
-              <q-btn color="primary" unelevated no-caps icon="search" label="搜索" @click="applyKeywordNow" />
-            </div>
-          </q-card-section>
+        <q-card-section class="row q-col-gutter-md items-center">
+          <div class="col-12 col-md-8">
+            <q-input v-model.trim="keywordInput" outlined dense label="搜索主题、发件人或摘要">
+              <template #append>
+                <q-btn v-if="keywordInput" flat round dense icon="close" @click="clearKeyword" />
+              </template>
+            </q-input>
+          </div>
+        </q-card-section>
 
-          <q-separator />
+        <q-separator />
 
-          <q-card-section>
-            <q-banner v-if="error" rounded dense class="bg-red-1 text-negative q-mb-md">
-              {{ error }}
-            </q-banner>
+        <q-card-section>
+          <q-banner v-if="error" rounded dense class="bg-red-1 text-negative q-mb-md">{{ error }}</q-banner>
+          <div v-if="messages.length > 0">
+            <MessageThreadCard v-for="item in messages" :key="item.id" :message="item" show-folder @changed="loadMessages(page)" @deleted="handleMessageDeleted(item.id)" @reply="openReplyDialog" />
+          </div>
+          <div v-else class="column items-center justify-center text-center q-py-xl text-grey-7">
+            <q-icon name="mail_off" size="56px" color="grey-5" />
+            <div class="text-subtitle1 q-mt-md">暂无匹配邮件</div>
+          </div>
+        </q-card-section>
 
-            <q-list v-if="messages.length > 0" bordered separator>
-              <q-item v-for="item in messages" :key="item.id" clickable @click="openDetail(item.id)">
-                <q-item-section>
-                  <q-item-label :class="item.is_read ? 'text-subtitle2' : 'text-subtitle2 text-weight-bold'">
-                    {{ item.subject || '(无主题)' }}
-                  </q-item-label>
-                  <q-item-label caption class="q-mt-xs">{{ item.from_name || item.from_address }}</q-item-label>
-                  <q-item-label caption class="q-mt-xs text-grey-7">{{ item.snippet || '暂无摘要' }}</q-item-label>
-                  <div class="row q-gutter-sm q-mt-sm">
-                    <q-badge color="grey-3" text-color="dark">{{ item.folder }}</q-badge>
-                    <q-badge v-if="item.has_attachment" color="grey-3" text-color="dark">含附件</q-badge>
-                    <q-badge v-if="!item.is_read" color="primary" text-color="white">未读</q-badge>
-                  </div>
-                </q-item-section>
-                <q-item-section side top>
-                  <div class="text-caption text-grey-6">{{ formatDate(item.sent_at) }}</div>
-                </q-item-section>
-              </q-item>
-            </q-list>
+        <q-separator />
 
-            <div v-else class="column items-center justify-center text-center q-py-xl text-grey-7">
-              <q-icon name="inbox" size="56px" color="grey-5" />
-              <div class="text-subtitle1 q-mt-md">暂无匹配邮件</div>
-            </div>
-          </q-card-section>
-
-          <q-separator />
-
-          <q-card-section class="row items-center justify-between q-gutter-sm">
-            <div class="text-body2 text-grey-7">共 {{ total }} 封，第 {{ page }} / {{ totalPages }} 页</div>
-            <div class="row q-gutter-sm">
-              <q-btn outline color="primary" no-caps :disable="page <= 1" label="上一页" @click="loadMessages(page - 1)" />
-              <q-btn outline color="primary" no-caps :disable="page >= totalPages" label="下一页" @click="loadMessages(page + 1)" />
-            </div>
-          </q-card-section>
+        <q-card-section class="row items-center justify-center q-gutter-sm">
+          <q-btn outline color="primary" no-caps :disable="page <= 1" label="上一页" @click="loadMessages(page - 1)" />
+          <q-select v-model="pageSize" outlined dense emit-value map-options :options="pageSizeOptions" style="min-width: 128px" @update:model-value="handlePageSizeChange" />
+          <div class="text-body2 text-grey-7">第 {{ page }} / {{ totalPages }} 页</div>
+          <div class="text-body2 text-grey-7">共 {{ total }} 封</div>
+          <q-btn outline color="primary" no-caps :disable="page >= totalPages" label="下一页" @click="loadMessages(page + 1)" />
+        </q-card-section>
       </q-card>
     </div>
 
+    <ComposeDialog v-model="showComposeDialog" :preset="composePreset" @sent="loadMessages(page)" />
+
     <q-page-sticky position="bottom-right" :offset="[24, 24]">
-      <q-fab color="primary" icon="refresh" direction="up" vertical-actions-align="right">
-        <q-tooltip>刷新操作</q-tooltip>
-        <q-fab-action color="primary" icon="refresh" label="刷新列表" label-position="left" @click="refreshAll">
-          <q-tooltip>刷新列表</q-tooltip>
-        </q-fab-action>
-      </q-fab>
+      <HoverActionFab primary-icon="edit_square" primary-label="写信" secondary-icon="refresh" secondary-label="刷新列表" @primary="openComposeDialog" @secondary="refreshAll" />
     </q-page-sticky>
   </q-page>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { request, type MailAccount, type MailboxItem, type MessageItem, type MessageListResponse } from '@/api'
-const router = useRouter()
+import ComposeDialog from '@/components/ComposeDialog.vue'
+import HoverActionFab from '@/components/HoverActionFab.vue'
+import MessageThreadCard from '@/components/MessageThreadCard.vue'
+
 const accounts = ref<MailAccount[]>([])
 const mailboxes = ref<MailboxItem[]>([])
 const messages = ref<MessageItem[]>([])
@@ -146,6 +110,8 @@ const keywordInput = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+const showComposeDialog = ref(false)
+const composePreset = ref<{ title?: string; account_id?: number; to?: string; subject?: string; body?: string } | null>(null)
 let keywordTimer: ReturnType<typeof setTimeout> | null = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
@@ -156,8 +122,8 @@ const accountOptions = computed(() => [
       if (!accountFilter.value.trim()) {
         return true
       }
-      const keyword = accountFilter.value.trim().toLowerCase()
-      return `${account.name} ${account.email}`.toLowerCase().includes(keyword)
+      const nextKeyword = accountFilter.value.trim().toLowerCase()
+      return `${account.name} ${account.email}`.toLowerCase().includes(nextKeyword)
     })
     .map((account) => ({ label: `${account.name} / ${account.email}`, value: String(account.id) })),
 ])
@@ -167,8 +133,12 @@ const pageSizeOptions = [
   { label: '50 条/页', value: 50 },
   { label: '100 条/页', value: 100 },
 ]
+const sortedMailboxes = computed(() =>
+  mailboxes.value
+    .map((mailbox) => ({ ...mailbox, label: mailboxLabel(mailbox) }))
+    .sort((left, right) => mailboxOrder(left) - mailboxOrder(right) || left.label.localeCompare(right.label, 'zh-CN')),
+)
 
-// refreshAll 统一刷新邮箱、文件夹和邮件列表，避免筛选项与数据源脱节。
 async function refreshAll() {
   error.value = ''
   try {
@@ -178,12 +148,10 @@ async function refreshAll() {
   }
 }
 
-// loadAccounts 加载邮箱列表，供筛选器和首页统计共用。
 async function loadAccounts() {
   accounts.value = await request<MailAccount[]>('/api/accounts')
 }
 
-// loadMailboxes 根据当前邮箱筛选刷新文件夹列表。
 async function loadMailboxes() {
   const query = selectedAccount.value ? `?account_id=${selectedAccount.value}` : ''
   mailboxes.value = await request<MailboxItem[]>(`/api/mailboxes${query}`)
@@ -192,7 +160,7 @@ async function loadMailboxes() {
   }
 }
 
-// loadMessages 根据左侧条件和顶部搜索词加载分页邮件列表。
+// loadMessages 根据邮箱、文件夹和搜索词刷新传统邮件列表。
 async function loadMessages(nextPage = page.value) {
   try {
     error.value = ''
@@ -209,8 +177,7 @@ async function loadMessages(nextPage = page.value) {
     }
     params.set('page', String(page.value))
     params.set('page_size', String(pageSize.value))
-    const query = params.toString() ? `?${params.toString()}` : ''
-    const response = await request<MessageListResponse>(`/api/messages${query}`)
+    const response = await request<MessageListResponse>(`/api/messages?${params.toString()}`)
     messages.value = response.items
     total.value = response.total
     page.value = response.page
@@ -219,42 +186,26 @@ async function loadMessages(nextPage = page.value) {
   }
 }
 
-// handleAccountChange 切换邮箱后清空文件夹并回到第一页，避免旧筛选残留。
 async function handleAccountChange() {
   selectedFolder.value = ''
-  page.value = 1
   await Promise.all([loadMailboxes(), loadMessages(1)])
 }
 
-// selectFolder 通过左侧文件夹按钮联动右侧邮件列表。
 function selectFolder(folder: string) {
   selectedFolder.value = folder
   void loadMessages(1)
 }
 
-// handlePageSizeChange 切换分页大小后强制回到第一页，避免页码越界。
 function handlePageSizeChange() {
   void loadMessages(1)
 }
 
-// filterAccounts 允许在邮箱筛选下拉中按名称或地址输入搜索，减少账号较多时的滚动查找成本。
 function filterAccounts(value: string, update: (callbackFn: () => void) => void) {
   update(() => {
     accountFilter.value = value
   })
 }
 
-// applyKeywordNow 在用户主动确认时立即应用搜索词，避免回车仍等待防抖延迟。
-function applyKeywordNow() {
-  if (keywordTimer) {
-    clearTimeout(keywordTimer)
-    keywordTimer = null
-  }
-  keyword.value = keywordInput.value.trim()
-  void loadMessages(1)
-}
-
-// clearKeyword 统一清空输入和已生效搜索词，并立即恢复默认结果。
 function clearKeyword() {
   if (keywordTimer) {
     clearTimeout(keywordTimer)
@@ -265,7 +216,38 @@ function clearKeyword() {
   void loadMessages(1)
 }
 
-// watch(keywordInput) 为搜索输入增加防抖，减少连续输入时的重复请求。
+function openComposeDialog() {
+  composePreset.value = selectedAccount.value ? { account_id: Number(selectedAccount.value), title: '写信' } : { title: '写信' }
+  showComposeDialog.value = true
+}
+
+function openReplyDialog(payload: { account_id: number; to: string; subject: string; body: string }) {
+  composePreset.value = { title: '回复邮件', ...payload }
+  showComposeDialog.value = true
+}
+
+function handleMessageDeleted(messageID: number) {
+  messages.value = messages.value.filter((item) => item.id !== messageID)
+  total.value = Math.max(0, total.value - 1)
+}
+
+function mailboxLabel(mailbox: MailboxItem) {
+  const value = `${mailbox.role || ''} ${mailbox.path}`.toLowerCase()
+  if (value.includes('inbox')) return '收件箱'
+  if (value.includes('sent')) return '已发送'
+  if (value.includes('draft')) return '草稿箱'
+  if (value.includes('trash') || value.includes('deleted')) return '已删除'
+  if (value.includes('junk') || value.includes('spam')) return '垃圾邮件'
+  if (value.includes('archive')) return '归档'
+  return mailbox.name
+}
+
+function mailboxOrder(mailbox: MailboxItem & { label: string }) {
+  const ordered = ['收件箱', '已发送', '草稿箱', '归档', '垃圾邮件', '已删除']
+  const index = ordered.indexOf(mailbox.label)
+  return index >= 0 ? index : ordered.length + 1
+}
+
 watch(keywordInput, (value) => {
   if (keywordTimer) {
     clearTimeout(keywordTimer)
@@ -276,24 +258,6 @@ watch(keywordInput, (value) => {
   }, 300)
 })
 
-// openDetail 进入详情页，以便继续查看正文和执行操作。
-async function openDetail(messageID: number) {
-  if (!Number.isFinite(messageID) || messageID <= 0) {
-    error.value = '邮件 ID 无效，无法打开详情'
-    return
-  }
-  await router.push(`/messages/${messageID}`)
-}
-
-// formatDate 统一处理时间显示，避免不同浏览器直接输出格式不一致。
-function formatDate(value: string) {
-  if (!value) {
-    return '刚刚'
-  }
-  return new Date(value).toLocaleString('zh-CN')
-}
-
-// onBeforeUnmount 清理残留定时器，避免页面切换后还触发旧搜索请求。
 onBeforeUnmount(() => {
   if (keywordTimer) {
     clearTimeout(keywordTimer)

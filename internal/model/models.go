@@ -13,6 +13,17 @@ type User struct {
 	PasswordHash string `gorm:"size:255;not null" json:"-"`
 }
 
+// UserPreference 保存管理员界面偏好，便于跨设备同步主题设置。
+type UserPreference struct {
+	utilsdb.Model
+	UserID         uint   `gorm:"uniqueIndex;not null" json:"user_id"`
+	ThemeName      string `gorm:"size:64;not null;default:classic_blue" json:"theme_name"`
+	ThemeMode      string `gorm:"size:16;not null;default:light" json:"theme_mode"`
+	PrimaryColor   string `gorm:"size:16;not null;default:#2563eb" json:"primary_color"`
+	SecondaryColor string `gorm:"size:16;not null;default:#7c3aed" json:"secondary_color"`
+	AccentColor    string `gorm:"size:16;not null;default:#06b6d4" json:"accent_color"`
+}
+
 // MailAccount 保存外部邮箱账户连接配置。
 type MailAccount struct {
 	utilsdb.Model
