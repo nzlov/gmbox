@@ -28,11 +28,25 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 	if err != nil {
 		return nil, err
 	}
-	defer client.Logout()
+	defer func() {
+		if client != nil {
+			_ = client.Logout()
+		}
+	}()
 	cursors := IMAPCursors(state)
 	mailboxes, err := listRemoteMailboxes(client)
 	if err != nil {
-		return nil, err
+		var fallbackErr error
+		mailboxes, fallbackErr = s.fallbackIMAPMailboxes(account, err)
+		if fallbackErr != nil {
+			return nil, fallbackErr
+		}
+		// LIST 解析失败通常意味着当前连接的读状态已经损坏，回退目录前先重连，避免后续命令继续复用坏连接。
+		_ = client.Logout()
+		client, err = dialIMAP(account, password)
+		if err != nil {
+			return nil, fmt.Errorf("IMAP 文件夹枚举失败后重连失败: %w", err)
+		}
 	}
 	if err := s.syncMailboxes(account, mailboxes); err != nil {
 		return nil, err
@@ -51,6 +65,31 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 	}
 	state.LastMessage = fmt.Sprintf("IMAP 同步完成，新增 %d 封邮件，覆盖 %d 个文件夹", totalNew, len(mailboxes))
 	return &SyncResult{NewMessages: totalNew, MailboxCount: len(mailboxes)}, nil
+}
+
+// fallbackIMAPMailboxes 在微软 OAuth 的 LIST 响应触发 go-imap 解析异常时，退回到已缓存文件夹和 INBOX，避免整轮同步被目录枚举阻断。
+func (s *Service) fallbackIMAPMailboxes(account model.MailAccount, listErr error) ([]model.Mailbox, error) {
+	if normalizeAuthType(account.AuthType) != "oauth" || normalizeProvider(account.Provider) != "outlook" {
+		return nil, listErr
+	}
+	fallback := []model.Mailbox{{Name: "INBOX", Path: "INBOX", Role: "inbox"}}
+	var cached []model.Mailbox
+	if err := s.db.Where("account_id = ?", account.Model.ID).Order("path asc").Find(&cached).Error; err != nil {
+		return nil, listErr
+	}
+	seen := map[string]struct{}{"INBOX": {}}
+	for _, mailbox := range cached {
+		path := strings.TrimSpace(mailbox.Path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		fallback = append(fallback, model.Mailbox{Name: displayMailboxName(path), Path: path, Role: mailboxRole(path)})
+	}
+	return fallback, nil
 }
 
 // syncIMAPMailbox 同步单个文件夹，并返回新增数量和最新 UID。

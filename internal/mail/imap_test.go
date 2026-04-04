@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -112,5 +113,47 @@ func TestShouldFetchMessageBodyKeepsLegacyFullBody(t *testing.T) {
 	}
 	if !shouldFetchMessageBody(nil, &model.MessageBody{TextBody: "摘要", BodyFetched: false}, message) {
 		t.Fatalf("仅有摘要缓存时应触发回源")
+	}
+}
+
+// TestFallbackIMAPMailboxesForOutlookOAuth 确保微软 OAuth 在 LIST 失败时仍能回退到 INBOX 和已缓存目录继续同步。
+func TestFallbackIMAPMailboxesForOutlookOAuth(t *testing.T) {
+	service := newTestMailService(t)
+	account := model.MailAccount{
+		Provider: "outlook",
+		AuthType: "oauth",
+	}
+	account.ID = 3
+	seed := []model.Mailbox{
+		{AccountID: account.ID, Name: "Sent Items", Path: "Sent Items", Role: "sent"},
+		{AccountID: account.ID, Name: "INBOX", Path: "INBOX", Role: "inbox"},
+	}
+	for _, mailbox := range seed {
+		if err := service.db.Create(&mailbox).Error; err != nil {
+			t.Fatalf("写入缓存文件夹失败: %v", err)
+		}
+	}
+	mailboxes, err := service.fallbackIMAPMailboxes(account, errors.New("列目录失败"))
+	if err != nil {
+		t.Fatalf("回退文件夹失败: %v", err)
+	}
+	if len(mailboxes) != 2 {
+		t.Fatalf("len(mailboxes) = %d, want 2", len(mailboxes))
+	}
+	if mailboxes[0].Path != "INBOX" {
+		t.Fatalf("mailboxes[0].Path = %q, want INBOX", mailboxes[0].Path)
+	}
+	if mailboxes[1].Path != "Sent Items" {
+		t.Fatalf("mailboxes[1].Path = %q, want Sent Items", mailboxes[1].Path)
+	}
+}
+
+// TestFallbackIMAPMailboxesRejectsNonOutlook 确保普通 IMAP 账户仍保留原始 LIST 错误，避免无意隐藏真实配置问题。
+func TestFallbackIMAPMailboxesRejectsNonOutlook(t *testing.T) {
+	service := newTestMailService(t)
+	originalErr := errors.New("列目录失败")
+	_, err := service.fallbackIMAPMailboxes(model.MailAccount{Provider: "gmail", AuthType: "oauth"}, originalErr)
+	if !errors.Is(err, originalErr) {
+		t.Fatalf("err = %v, want %v", err, originalErr)
 	}
 }
