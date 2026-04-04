@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/emersion/go-imap"
+	"github.com/emersion/go-imap/v2"
 	message "github.com/emersion/go-message"
 	_ "github.com/emersion/go-message/charset"
 	gomail "github.com/emersion/go-message/mail"
@@ -21,9 +21,6 @@ var htmlTagPattern = regexp.MustCompile(`<[^>]+>`)
 func init() {
 	baseReader := message.CharsetReader
 	message.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
-		return normalizeMessageCharsetReader(baseReader, charset, input)
-	}
-	imap.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
 		return normalizeMessageCharsetReader(baseReader, charset, input)
 	}
 }
@@ -173,14 +170,14 @@ func (p *parsedMessage) enrichFromEnvelope(envelope *imap.Envelope, flags []stri
 		p.Subject = envelope.Subject
 	}
 	if p.MessageID == "" {
-		p.MessageID = envelope.MessageId
+		p.MessageID = envelope.MessageID
 	}
 	if p.SentAt.IsZero() {
 		p.SentAt = envelope.Date
 	}
 	if p.FromAddress == "" && len(envelope.From) > 0 {
-		p.FromName = envelope.From[0].PersonalName
-		p.FromAddress = envelope.From[0].Address()
+		p.FromName = envelope.From[0].Name
+		p.FromAddress = envelope.From[0].Addr()
 	}
 	if p.ToAddresses == "" && len(envelope.To) > 0 {
 		p.ToAddresses = joinIMAPAddresses(envelope.To)
@@ -213,15 +210,12 @@ func joinMailAddresses(addrs []*gomail.Address) string {
 }
 
 // joinIMAPAddresses 统一格式化 IMAP 地址列表。
-func joinIMAPAddresses(addrs []*imap.Address) string {
+func joinIMAPAddresses(addrs []imap.Address) string {
 	parts := make([]string, 0, len(addrs))
 	for _, addr := range addrs {
-		if addr == nil {
-			continue
-		}
-		label := addr.Address()
-		if strings.TrimSpace(addr.PersonalName) != "" {
-			label = fmt.Sprintf("%s <%s>", addr.PersonalName, addr.Address())
+		label := addr.Addr()
+		if strings.TrimSpace(addr.Name) != "" {
+			label = fmt.Sprintf("%s <%s>", addr.Name, addr.Addr())
 		}
 		parts = append(parts, label)
 	}
@@ -245,7 +239,7 @@ func buildSnippet(textBody string, htmlBody string) string {
 // hasSeenFlag 将 IMAP flags 转换为统一已读状态。
 func hasSeenFlag(flags []string) bool {
 	for _, flag := range flags {
-		if strings.EqualFold(flag, imap.SeenFlag) {
+		if strings.EqualFold(flag, string(imap.FlagSeen)) {
 			return true
 		}
 	}

@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/textproto"
 	"os"
@@ -13,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/emersion/go-imap"
-	imapclient "github.com/emersion/go-imap/client"
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 	"gorm.io/gorm"
 
 	appcfg "gmbox/internal/config"
@@ -308,41 +307,46 @@ func (s *Service) fetchIMAPMessageBody(ctx context.Context, account model.MailAc
 	if err != nil {
 		return nil, err
 	}
-	defer client.Logout()
-	if _, err := client.Select(message.Folder, false); err != nil {
+	defer client.Logout().Wait()
+	if _, err := client.Select(message.Folder, nil).Wait(); err != nil {
 		return nil, fmt.Errorf("选择文件夹 %s 失败: %w", message.Folder, err)
 	}
-	section := &imap.BodySectionName{}
-	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, imap.FetchFlags, imap.FetchInternalDate, section.FetchItem()}
-	ch := make(chan *imap.Message, 1)
-	done := make(chan error, 1)
-	go func() {
-		done <- client.UidFetch(newUIDSet(message.UID), items, ch)
-	}()
+	section := &imap.FetchItemBodySection{}
+	fetchCmd := client.Fetch(newUIDSet(message.UID), &imap.FetchOptions{
+		UID:          true,
+		Envelope:     true,
+		Flags:        true,
+		InternalDate: true,
+		BodySection:  []*imap.FetchItemBodySection{section},
+	})
 	var fetched *parsedMessage
-	for msg := range ch {
+	for {
+		msg := fetchCmd.Next()
+		if msg == nil {
+			break
+		}
 		if msg == nil {
 			continue
 		}
-		rawBody := msg.GetBody(section)
-		if rawBody == nil {
-			continue
+		buffer, collectErr := msg.Collect()
+		if collectErr != nil {
+			return nil, fmt.Errorf("抓取邮件正文失败: %w", collectErr)
 		}
-		raw, err := io.ReadAll(rawBody)
-		if err != nil {
-			return nil, fmt.Errorf("读取 IMAP 正文失败: %w", err)
+		raw := buffer.FindBodySection(section)
+		if raw == nil {
+			continue
 		}
 		parsed, err := parseRawMessage(raw)
 		if err != nil {
 			return nil, err
 		}
-		parsed.enrichFromEnvelope(msg.Envelope, msg.Flags)
+		parsed.enrichFromEnvelope(buffer.Envelope, flagsToStrings(buffer.Flags))
 		if parsed.SentAt.IsZero() {
-			parsed.SentAt = msg.InternalDate
+			parsed.SentAt = buffer.InternalDate
 		}
 		fetched = parsed
 	}
-	if err := <-done; err != nil {
+	if err := fetchCmd.Close(); err != nil {
 		return nil, fmt.Errorf("抓取邮件正文失败: %w", err)
 	}
 	if fetched == nil {
@@ -430,17 +434,16 @@ func (s *Service) SetMessageRead(ctx context.Context, messageID uint, isRead boo
 		if err != nil {
 			return err
 		}
-		defer client.Logout()
-		if _, err := client.Select(message.Folder, false); err != nil {
+		defer client.Logout().Wait()
+		if _, err := client.Select(message.Folder, nil).Wait(); err != nil {
 			return err
 		}
 		seqset := newUIDSet(message.UID)
-		item := imap.FormatFlagsOp(imap.AddFlags, true)
-		flags := []interface{}{imap.SeenFlag}
+		item := &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagSeen}}
 		if !isRead {
-			item = imap.FormatFlagsOp(imap.RemoveFlags, true)
+			item = &imap.StoreFlags{Op: imap.StoreFlagsDel, Silent: true, Flags: []imap.Flag{imap.FlagSeen}}
 		}
-		if err := client.UidStore(seqset, item, flags, nil); err != nil {
+		if err := client.Store(seqset, item, nil).Close(); err != nil {
 			return err
 		}
 	}
@@ -470,15 +473,15 @@ func (s *Service) DeleteMessage(ctx context.Context, messageID uint) error {
 	if err != nil {
 		return err
 	}
-	defer client.Logout()
-	if _, err := client.Select(message.Folder, false); err != nil {
+	defer client.Logout().Wait()
+	if _, err := client.Select(message.Folder, nil).Wait(); err != nil {
 		return err
 	}
 	seqset := newUIDSet(message.UID)
-	if err := client.UidStore(seqset, imap.FormatFlagsOp(imap.AddFlags, true), []interface{}{imap.DeletedFlag}, nil); err != nil {
+	if err := client.Store(seqset, &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close(); err != nil {
 		return err
 	}
-	if err := client.Expunge(nil); err != nil {
+	if _, err := client.Expunge().Collect(); err != nil {
 		return err
 	}
 	message.IsDeleted = true
@@ -506,11 +509,11 @@ func (s *Service) MoveMessage(ctx context.Context, messageID uint, targetFolder 
 	if err != nil {
 		return err
 	}
-	defer client.Logout()
-	if _, err := client.Select(message.Folder, false); err != nil {
+	defer client.Logout().Wait()
+	if _, err := client.Select(message.Folder, nil).Wait(); err != nil {
 		return err
 	}
-	if err := client.UidMove(newUIDSet(message.UID), targetFolder); err != nil {
+	if _, err := client.Move(newUIDSet(message.UID), targetFolder).Wait(); err != nil {
 		return err
 	}
 	newUID, err := findUIDInFolder(client, targetFolder, message)
@@ -559,72 +562,76 @@ func attachmentBaseDir() string {
 
 // findUIDInFolder 在移动完成后优先按 Message-ID，回退按日期、主题、发件人定位目标文件夹中的新 UID。
 func findUIDInFolder(client *imapclient.Client, folder string, message model.Message) (uint32, error) {
-	mbox, err := client.Select(folder, false)
+	mbox, err := client.Select(folder, nil).Wait()
 	if err != nil {
 		return 0, err
 	}
 	if strings.TrimSpace(message.MessageID) != "" {
-		criteria := imap.NewSearchCriteria()
-		criteria.Header.Add("Message-Id", message.MessageID)
-		uids, err := client.UidSearch(criteria)
+		criteria := &imap.SearchCriteria{Header: []imap.SearchCriteriaHeaderField{{Key: "Message-Id", Value: message.MessageID}}}
+		searchData, err := client.UIDSearch(criteria, nil).Wait()
 		if err != nil {
 			return 0, err
 		}
+		uids := searchData.AllUIDs()
 		if len(uids) == 1 {
-			return uids[0], nil
+			return uint32(uids[0]), nil
 		}
 	}
-	criteria := imap.NewSearchCriteria()
+	criteria := &imap.SearchCriteria{}
 	if !message.SentAt.IsZero() {
 		dayStart := time.Date(message.SentAt.Year(), message.SentAt.Month(), message.SentAt.Day(), 0, 0, 0, 0, message.SentAt.Location())
 		criteria.SentSince = dayStart
 		criteria.SentBefore = dayStart.Add(24 * time.Hour)
 	}
 	if strings.TrimSpace(message.Subject) != "" {
-		criteria.Header.Add("Subject", message.Subject)
+		criteria.Header = append(criteria.Header, imap.SearchCriteriaHeaderField{Key: "Subject", Value: message.Subject})
 	}
 	if strings.TrimSpace(message.FromAddress) != "" {
-		criteria.Header.Add("From", message.FromAddress)
+		criteria.Header = append(criteria.Header, imap.SearchCriteriaHeaderField{Key: "From", Value: message.FromAddress})
 	}
-	uids, err := client.UidSearch(criteria)
+	searchData, err := client.UIDSearch(criteria, nil).Wait()
 	if err != nil {
 		return 0, err
 	}
+	uids := searchData.AllUIDs()
 	if len(uids) == 1 {
-		return uids[0], nil
+		return uint32(uids[0]), nil
 	}
 	return fallbackFindUIDByEnvelope(client, mbox, message)
 }
 
 // fallbackFindUIDByEnvelope 抓取目标文件夹最近一批邮件的 ENVELOPE 并本地比对，兜底恢复移动后的新 UID。
-func fallbackFindUIDByEnvelope(client *imapclient.Client, mailbox *imap.MailboxStatus, message model.Message) (uint32, error) {
-	if mailbox == nil || mailbox.Messages == 0 {
+func fallbackFindUIDByEnvelope(client *imapclient.Client, mailbox *imap.SelectData, message model.Message) (uint32, error) {
+	if mailbox == nil || mailbox.NumMessages == 0 {
 		return 0, nil
 	}
 	from := uint32(1)
-	if mailbox.Messages > 50 {
-		from = mailbox.Messages - 49
+	if mailbox.NumMessages > 50 {
+		from = mailbox.NumMessages - 49
 	}
-	seqset := new(imap.SeqSet)
-	seqset.AddRange(from, mailbox.Messages)
-	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope}
-	ch := make(chan *imap.Message, 20)
-	done := make(chan error, 1)
-	go func() {
-		done <- client.Fetch(seqset, items, ch)
-	}()
+	seqset := imap.SeqSetNum(from)
+	seqset.AddRange(from, mailbox.NumMessages)
+	fetchCmd := client.Fetch(seqset, &imap.FetchOptions{UID: true, Envelope: true})
 	var matched uint32
 	matchedCount := 0
-	for fetched := range ch {
-		if fetched == nil || fetched.Envelope == nil {
+	for {
+		fetched := fetchCmd.Next()
+		if fetched == nil {
+			break
+		}
+		buffer, collectErr := fetched.Collect()
+		if collectErr != nil {
+			return 0, collectErr
+		}
+		if buffer.Envelope == nil {
 			continue
 		}
-		if envelopeMatchesMessage(fetched.Envelope, message) {
-			matched = fetched.Uid
+		if envelopeMatchesMessage(buffer.Envelope, message) {
+			matched = uint32(buffer.UID)
 			matchedCount++
 		}
 	}
-	if err := <-done; err != nil {
+	if err := fetchCmd.Close(); err != nil {
 		return 0, err
 	}
 	if matchedCount != 1 {
@@ -647,7 +654,7 @@ func envelopeMatchesMessage(envelope *imap.Envelope, message model.Message) bool
 	if len(envelope.From) == 0 {
 		return strings.TrimSpace(message.FromAddress) == ""
 	}
-	return strings.EqualFold(strings.TrimSpace(envelope.From[0].Address()), strings.TrimSpace(message.FromAddress))
+	return strings.EqualFold(strings.TrimSpace(envelope.From[0].Addr()), strings.TrimSpace(message.FromAddress))
 }
 
 // normalizeHeaderValue 统一收敛头字段比较格式，避免大小写和空白差异导致误判。

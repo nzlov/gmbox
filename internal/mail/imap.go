@@ -4,15 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/emersion/go-imap"
-	imapclient "github.com/emersion/go-imap/client"
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 	"gorm.io/gorm"
 
 	"gmbox/internal/model"
@@ -30,7 +29,7 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 	}
 	defer func() {
 		if client != nil {
-			_ = client.Logout()
+			_ = client.Logout().Wait()
 		}
 	}()
 	cursors := IMAPCursors(state)
@@ -42,7 +41,7 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 			return nil, fallbackErr
 		}
 		// LIST 解析失败通常意味着当前连接的读状态已经损坏，回退目录前先重连，避免后续命令继续复用坏连接。
-		_ = client.Logout()
+		_ = client.Logout().Wait()
 		client, err = dialIMAP(account, password)
 		if err != nil {
 			return nil, fmt.Errorf("IMAP 文件夹枚举失败后重连失败: %w", err)
@@ -94,24 +93,25 @@ func (s *Service) fallbackIMAPMailboxes(account model.MailAccount, listErr error
 
 // syncIMAPMailbox 同步单个文件夹，并返回新增数量和最新 UID。
 func (s *Service) syncIMAPMailbox(client *imapclient.Client, account model.MailAccount, folder string, lastUID uint32, fetchBody bool) (int, uint32, error) {
-	mbox, err := client.Select(folder, false)
+	mbox, err := client.Select(folder, nil).Wait()
 	if err != nil {
 		return 0, lastUID, fmt.Errorf("选择文件夹 %s 失败: %w", folder, err)
 	}
-	if mbox.Messages == 0 {
+	if mbox.NumMessages == 0 {
 		return 0, lastUID, nil
 	}
 
 	criteria := &imap.SearchCriteria{}
-	uids, err := client.UidSearch(criteria)
+	searchData, err := client.UIDSearch(criteria, nil).Wait()
 	if err != nil {
 		return 0, lastUID, fmt.Errorf("查询文件夹 %s 的 UID 失败: %w", folder, err)
 	}
+	uids := searchData.AllUIDs()
 	sort.Slice(uids, func(i, j int) bool { return uids[i] < uids[j] })
 
-	newUIDs := make([]uint32, 0, len(uids))
+	newUIDs := make([]imap.UID, 0, len(uids))
 	for _, uid := range uids {
-		if uid > lastUID {
+		if uint32(uid) > lastUID {
 			newUIDs = append(newUIDs, uid)
 		}
 	}
@@ -119,47 +119,51 @@ func (s *Service) syncIMAPMailbox(client *imapclient.Client, account model.MailA
 		return 0, lastUID, nil
 	}
 
-	seqset := new(imap.SeqSet)
-	seqset.AddNum(newUIDs...)
-	section := &imap.BodySectionName{}
-	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, imap.FetchFlags, imap.FetchInternalDate, section.FetchItem()}
-	messages := make(chan *imap.Message, minInt(10, len(newUIDs)))
-	done := make(chan error, 1)
-	go func() {
-		done <- client.UidFetch(seqset, items, messages)
-	}()
+	seqset := imap.UIDSetNum(newUIDs...)
+	section := &imap.FetchItemBodySection{}
+	fetchCmd := client.Fetch(seqset, &imap.FetchOptions{
+		UID:          true,
+		Envelope:     true,
+		Flags:        true,
+		InternalDate: true,
+		BodySection:  []*imap.FetchItemBodySection{section},
+	})
 
 	var maxUID uint32 = lastUID
 	total := 0
-	for msg := range messages {
+	for {
+		msg := fetchCmd.Next()
+		if msg == nil {
+			break
+		}
 		if msg == nil {
 			continue
 		}
-		body := msg.GetBody(section)
+		buffer, collectErr := msg.Collect()
+		if collectErr != nil {
+			return 0, lastUID, fmt.Errorf("抓取文件夹 %s 的邮件失败: %w", folder, collectErr)
+		}
+		body := buffer.FindBodySection(section)
 		if body == nil {
 			continue
 		}
-		raw, readErr := io.ReadAll(body)
-		if readErr != nil {
-			return 0, lastUID, fmt.Errorf("读取 IMAP 正文失败: %w", readErr)
-		}
-		parsed, parseErr := parseRawMessage(raw)
+		parsed, parseErr := parseRawMessage(body)
 		if parseErr != nil {
 			return 0, lastUID, parseErr
 		}
-		parsed.enrichFromEnvelope(msg.Envelope, msg.Flags)
+		parsed.enrichFromEnvelope(buffer.Envelope, flagsToStrings(buffer.Flags))
 		if parsed.SentAt.IsZero() {
-			parsed.SentAt = msg.InternalDate
+			parsed.SentAt = buffer.InternalDate
 		}
-		if err := s.upsertMessage(account, folder, msg.Uid, "", parsed, fetchBody); err != nil {
+		if err := s.upsertMessage(account, folder, uint32(buffer.UID), "", parsed, fetchBody); err != nil {
 			return 0, lastUID, err
 		}
 		total++
-		if msg.Uid > maxUID {
-			maxUID = msg.Uid
+		if uint32(buffer.UID) > maxUID {
+			maxUID = uint32(buffer.UID)
 		}
 	}
-	if err := <-done; err != nil {
+	if err := fetchCmd.Close(); err != nil {
 		return 0, lastUID, fmt.Errorf("抓取文件夹 %s 的邮件失败: %w", folder, err)
 	}
 	return total, maxUID, nil
@@ -182,8 +186,8 @@ func dialIMAP(account model.MailAccount, password string) (*imapclient.Client, e
 	if err != nil {
 		return nil, err
 	}
-	if err := client.Login(username, password); err != nil {
-		_ = client.Logout()
+	if err := client.Login(username, password).Wait(); err != nil {
+		_ = client.Logout().Wait()
 		return nil, fmt.Errorf("IMAP 登录失败: %w", err)
 	}
 	return client, nil
@@ -196,9 +200,9 @@ func openIMAPClient(account model.MailAccount) (*imapclient.Client, error) {
 	var err error
 	if account.UseTLS {
 		dialer := &net.Dialer{Timeout: 15 * time.Second}
-		client, err = imapclient.DialWithDialerTLS(dialer, addr, &tls.Config{ServerName: account.IMAPHost, MinVersion: tls.VersionTLS12})
+		client, err = imapclient.DialTLS(addr, &imapclient.Options{TLSConfig: &tls.Config{ServerName: account.IMAPHost, MinVersion: tls.VersionTLS12}, Dialer: dialer})
 	} else {
-		client, err = imapclient.Dial(addr)
+		client, err = imapclient.DialInsecure(addr, nil)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("连接 IMAP 失败: %w", err)
@@ -227,7 +231,7 @@ func dialIMAPOAuth(account model.MailAccount, username string, token string) (*i
 		return nil, err
 	}
 	attempts := buildIMAPOAuthAttempts(probeClient, account, username, token)
-	_ = probeClient.Logout()
+	_ = probeClient.Logout().Wait()
 
 	var failureMessages []string
 	for _, attempt := range attempts {
@@ -238,7 +242,7 @@ func dialIMAPOAuth(account model.MailAccount, username string, token string) (*i
 		}
 		if err := attempt.auth(client); err != nil {
 			failureMessages = append(failureMessages, fmt.Sprintf("%s 失败: %v", attempt.name, err))
-			_ = client.Logout()
+			_ = client.Logout().Wait()
 			continue
 		}
 		return client, nil
@@ -262,7 +266,7 @@ func buildIMAPOAuthAttempts(client *imapclient.Client, account model.MailAccount
 		orderedNames = append(orderedNames, name)
 	}
 	for _, name := range preferredOrder {
-		if supported, err := client.SupportAuth(name); err == nil && supported {
+		if client.Caps().Has(imap.AuthCap(name)) {
 			appendMechanism(name)
 		}
 	}
@@ -384,22 +388,22 @@ func (s *Service) ensureMailbox(accountID uint, path string) (uint, error) {
 
 // listRemoteMailboxes 列出 IMAP 可见文件夹，并过滤噪声目录。
 func listRemoteMailboxes(client *imapclient.Client) ([]model.Mailbox, error) {
-	ch := make(chan *imap.MailboxInfo, 32)
-	done := make(chan error, 1)
-	go func() {
-		done <- client.List("", "*", ch)
-	}()
+	listCmd := client.List("", "*", nil)
 	result := make([]model.Mailbox, 0)
-	for mailbox := range ch {
-		if mailbox == nil || strings.TrimSpace(mailbox.Name) == "" {
+	for {
+		mailbox := listCmd.Next()
+		if mailbox == nil {
+			break
+		}
+		if strings.TrimSpace(mailbox.Mailbox) == "" {
 			continue
 		}
-		if hasMailboxAttribute(mailbox.Attributes, `\\Noselect`) {
+		if hasMailboxAttribute(mailbox.Attrs, `\\Noselect`) {
 			continue
 		}
-		result = append(result, model.Mailbox{Name: displayMailboxName(mailbox.Name), Path: mailbox.Name, Role: mailboxRole(mailbox.Name)})
+		result = append(result, model.Mailbox{Name: displayMailboxName(mailbox.Mailbox), Path: mailbox.Mailbox, Role: mailboxRole(mailbox.Mailbox)})
 	}
-	if err := <-done; err != nil {
+	if err := listCmd.Close(); err != nil {
 		return nil, fmt.Errorf("列出 IMAP 文件夹失败: %w", err)
 	}
 	if len(result) == 0 {
@@ -452,20 +456,27 @@ func (s *Service) replaceAttachments(messageID uint, attachments []parsedAttachm
 }
 
 // newUIDSet 为单封邮件操作构造 UID 序列集合。
-func newUIDSet(uid uint32) *imap.SeqSet {
-	seqset := new(imap.SeqSet)
-	seqset.AddNum(uid)
-	return seqset
+func newUIDSet(uid uint32) imap.UIDSet {
+	return imap.UIDSetNum(imap.UID(uid))
 }
 
 // hasMailboxAttribute 判断文件夹是否包含指定属性。
-func hasMailboxAttribute(attrs []string, target string) bool {
+func hasMailboxAttribute(attrs []imap.MailboxAttr, target string) bool {
 	for _, attr := range attrs {
-		if strings.EqualFold(attr, target) {
+		if strings.EqualFold(string(attr), target) {
 			return true
 		}
 	}
 	return false
+}
+
+// flagsToStrings 统一兼容 go-imap v2 的 Flag 类型，减少现有解析逻辑改动范围。
+func flagsToStrings(flags []imap.Flag) []string {
+	result := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		result = append(result, string(flag))
+	}
+	return result
 }
 
 // displayMailboxName 生成适合前端展示的文件夹名称。
