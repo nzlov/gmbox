@@ -26,10 +26,17 @@
 ## 本地启动
 
 ```bash
-npm install
-npm run build
-go run ./cmd/server
+make deps
+make build
+make run
 ```
+
+如果只想执行单独步骤：
+
+- `make web-build`：构建前端静态资源
+- `make server-build`：构建服务端二进制 `./gmbox`
+- `make test`：运行 Go 测试
+- `make clean`：清理本地产物
 
 默认地址：`http://127.0.0.1:8080`
 
