@@ -208,12 +208,7 @@ func (s *Service) refreshOAuthAccessToken(ctx context.Context, account *model.Ma
 	if err != nil || strings.TrimSpace(refreshToken) == "" {
 		return "", fmt.Errorf("OAuth refresh token 不可用，请重新授权")
 	}
-	token, err := s.exchangeMicrosoftToken(ctx, url.Values{
-		"grant_type":    []string{"refresh_token"},
-		"refresh_token": []string{refreshToken},
-		"scope":         []string{microsoftAuthorizeScope},
-		"redirect_uri":  []string{s.cfg.MicrosoftOAuth.RedirectURL},
-	})
+	token, err := s.exchangeMicrosoftToken(ctx, microsoftRefreshTokenForm(refreshToken, s.cfg.MicrosoftOAuth.RedirectURL))
 	if err != nil {
 		return "", err
 	}
@@ -224,6 +219,19 @@ func (s *Service) refreshOAuthAccessToken(ctx context.Context, account *model.Ma
 		return "", err
 	}
 	return token.AccessToken, nil
+}
+
+// microsoftRefreshTokenForm 仅在显式配置回调地址时附带 redirect_uri，避免动态回调场景把空值传给微软 token 端点。
+func microsoftRefreshTokenForm(refreshToken string, redirectURI string) url.Values {
+	form := url.Values{
+		"grant_type":    []string{"refresh_token"},
+		"refresh_token": []string{refreshToken},
+		"scope":         []string{microsoftAuthorizeScope},
+	}
+	if strings.TrimSpace(redirectURI) != "" {
+		form.Set("redirect_uri", strings.TrimSpace(redirectURI))
+	}
+	return form
 }
 
 // ForceRefreshOAuthAccessToken 在协议登录失败后主动刷新一次 access token，给同步器提供重试入口。
