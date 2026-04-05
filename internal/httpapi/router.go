@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -101,7 +102,7 @@ func registerPublic(api *gin.RouterGroup, app *runtime.App) {
 			c.JSON(http.StatusUnauthorized, gin.H{"message": "用户名或密码错误"})
 			return
 		}
-		token, err := app.JWT.Sign(user.Model.ID, user.Username)
+		token, err := app.JWT.Sign(user.Model.ID, user.Username, user.SessionVersion)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "签发令牌失败"})
 			return
@@ -117,7 +118,7 @@ func registerPublic(api *gin.RouterGroup, app *runtime.App) {
 // registerProtected 注册需要登录后才能访问的核心业务接口。
 func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 	protected := api.Group("")
-	protected.Use(auth.Middleware(app.Config.Auth.CookieName, app.JWT))
+	protected.Use(auth.Middleware(app.Config.Auth.CookieName, app.JWT, app.DB))
 
 	protected.GET("/auth/me", func(c *gin.Context) {
 		claims := auth.MustClaims(c)
@@ -126,6 +127,49 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 	protected.POST("/auth/logout", func(c *gin.Context) {
 		c.SetCookie(app.Config.Auth.CookieName, "", -1, "/", "", false, true)
 		c.JSON(http.StatusOK, gin.H{"message": "已退出登录"})
+	})
+	protected.POST("/auth/change-password", func(c *gin.Context) {
+		claims := auth.MustClaims(c)
+		var req struct {
+			CurrentPassword string `json:"current_password" binding:"required"`
+			NewPassword     string `json:"new_password" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
+			return
+		}
+		if utf8.RuneCountInString(req.NewPassword) < 8 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "新密码长度不能少于 8 位"})
+			return
+		}
+		if req.CurrentPassword == req.NewPassword {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "新密码不能与当前密码相同"})
+			return
+		}
+
+		var user model.User
+		if err := app.DB.First(&user, claims.UserID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "读取当前用户失败"})
+			return
+		}
+		if !auth.ComparePassword(user.PasswordHash, req.CurrentPassword) {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "当前密码不正确"})
+			return
+		}
+		hash, err := auth.HashPassword(req.NewPassword)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "生成新密码失败"})
+			return
+		}
+		if err := app.DB.Model(&user).Updates(map[string]any{
+			"password_hash":   hash,
+			"session_version": gorm.Expr("session_version + 1"),
+		}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "保存新密码失败"})
+			return
+		}
+		c.SetCookie(app.Config.Auth.CookieName, "", -1, "/", "", false, true)
+		c.JSON(http.StatusOK, gin.H{"message": "密码修改成功，请重新登录"})
 	})
 	protected.GET("/account-providers", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

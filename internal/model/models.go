@@ -9,8 +9,9 @@ import (
 // User 保存后台管理员账户。
 type User struct {
 	utilsdb.Model
-	Username     string `gorm:"size:128;uniqueIndex;not null" json:"username"`
-	PasswordHash string `gorm:"size:255;not null" json:"-"`
+	Username       string `gorm:"size:128;uniqueIndex;not null" json:"username"`
+	PasswordHash   string `gorm:"size:255;not null" json:"-"`
+	SessionVersion uint   `gorm:"not null;default:1" json:"-"`
 }
 
 // UserPreference 保存管理员界面偏好，便于跨设备同步主题设置。

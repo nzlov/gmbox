@@ -8,8 +8,31 @@
           <div class="text-weight-bold">gmbox</div>
           <div class="text-caption">统一邮箱工作台</div>
         </q-toolbar-title>
-        <q-btn flat round dense icon="palette" @click="showThemeDialog = true">
-          <q-tooltip>切换主题</q-tooltip>
+        <q-btn flat round dense icon="settings">
+          <q-tooltip>设置</q-tooltip>
+          <q-menu auto-close>
+            <q-list dense style="min-width: 11rem;">
+              <q-item clickable @click="openPasswordDialog">
+                <q-item-section avatar>
+                  <q-icon name="password" />
+                </q-item-section>
+                <q-item-section>修改密码</q-item-section>
+              </q-item>
+              <q-item clickable @click="showThemeDialog = true">
+                <q-item-section avatar>
+                  <q-icon name="palette" />
+                </q-item-section>
+                <q-item-section>主题切换</q-item-section>
+              </q-item>
+              <q-separator />
+              <q-item clickable @click="logout">
+                <q-item-section avatar>
+                  <q-icon name="logout" />
+                </q-item-section>
+                <q-item-section>登出</q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
         </q-btn>
       </q-toolbar>
     </q-header>
@@ -35,12 +58,6 @@
             </q-item-section>
           </q-item>
         </q-list>
-
-        <q-space />
-
-        <div class="gmbox-page">
-          <q-btn color="primary" outline class="full-width" icon="logout" label="退出登录" @click="logout" />
-        </div>
       </div>
     </q-drawer>
 
@@ -125,6 +142,31 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <q-dialog v-model="showPasswordDialog" @hide="resetPasswordForm">
+      <q-card class="full-width gmbox-dialog-small">
+        <q-card-section class="row items-start justify-between">
+          <div>
+            <div class="text-h6 text-weight-bold">修改密码</div>
+            <div class="text-body2 text-grey-7 gmbox-section-hint">修改成功后会立即生效，请使用新密码登录后续会话。</div>
+          </div>
+          <q-btn flat round dense icon="close" v-close-popup />
+        </q-card-section>
+
+        <q-separator />
+
+        <q-card-section class="column gmbox-row-gap-md">
+          <q-input v-model="passwordForm.current_password" outlined type="password" label="当前密码" autocomplete="current-password" />
+          <q-input v-model="passwordForm.new_password" outlined type="password" label="新密码" autocomplete="new-password" hint="至少 8 位" />
+          <q-input v-model="passwordForm.confirm_password" outlined type="password" label="确认新密码" autocomplete="new-password" />
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat no-caps label="取消" :disable="passwordSubmitting" v-close-popup />
+          <q-btn color="primary" unelevated no-caps label="确认修改" :loading="passwordSubmitting" @click="submitPasswordChange" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-layout>
 </template>
 
@@ -143,12 +185,19 @@ const router = useRouter()
 const $q = useQuasar()
 const drawerOpen = ref(true)
 const showThemeDialog = ref(false)
+const showPasswordDialog = ref(false)
+const passwordSubmitting = ref(false)
 const draftTheme = reactive<ThemePreference>(defaultThemePreference())
 const committedTheme = reactive<ThemePreference>({ ...themeState })
 const themeSaveCommitted = ref(false)
 const themeDraftDirty = ref(false)
 const syncingThemeDraft = ref(false)
 const drawerWidth = useResponsiveDrawerWidth()
+const passwordForm = reactive({
+  current_password: '',
+  new_password: '',
+  confirm_password: '',
+})
 const presets = themePresets
 const themeModeOptions = [
   { label: '浅色', value: 'light' },
@@ -190,8 +239,64 @@ function handleNavClick() {
 
 // logout 统一清理登录态，避免每个业务页重复实现同样逻辑。
 async function logout() {
-  await request('/api/auth/logout', { method: 'POST' })
-  await router.push('/login')
+  try {
+    await request('/api/auth/logout', { method: 'POST' })
+    await router.push('/login')
+  } catch (error) {
+    $q.notify({ type: 'negative', message: error instanceof Error ? error.message : '退出登录失败' })
+  }
+}
+
+// openPasswordDialog 每次打开前重置输入，避免上一次失败或关闭后的内容残留。
+function openPasswordDialog() {
+  resetPasswordForm()
+  showPasswordDialog.value = true
+}
+
+// resetPasswordForm 在弹窗关闭后清空敏感输入，避免密码在界面中停留。
+function resetPasswordForm() {
+  passwordSubmitting.value = false
+  passwordForm.current_password = ''
+  passwordForm.new_password = ''
+  passwordForm.confirm_password = ''
+}
+
+// submitPasswordChange 先在前端完成基本校验，再调用后端改密接口，减少无意义请求。
+async function submitPasswordChange() {
+  if (!passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password) {
+    $q.notify({ type: 'warning', message: '请填写完整密码信息' })
+    return
+  }
+  if (passwordForm.new_password.length < 8) {
+    $q.notify({ type: 'warning', message: '新密码长度不能少于 8 位' })
+    return
+  }
+  if (passwordForm.new_password !== passwordForm.confirm_password) {
+    $q.notify({ type: 'warning', message: '两次输入的新密码不一致' })
+    return
+  }
+  if (passwordForm.current_password === passwordForm.new_password) {
+    $q.notify({ type: 'warning', message: '新密码不能与当前密码相同' })
+    return
+  }
+
+  passwordSubmitting.value = true
+  try {
+    const response = await request<{ message: string }>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password,
+      }),
+    })
+    $q.notify({ type: 'positive', message: response.message || '密码修改成功，请重新登录' })
+    showPasswordDialog.value = false
+    await router.push('/login')
+  } catch (error) {
+    $q.notify({ type: 'negative', message: error instanceof Error ? error.message : '密码修改失败' })
+  } finally {
+    passwordSubmitting.value = false
+  }
 }
 
 // applyPreset 允许用户从常用主题开始，再按需继续微调颜色。

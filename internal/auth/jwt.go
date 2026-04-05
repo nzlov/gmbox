@@ -9,8 +9,9 @@ import (
 
 // Claims 保存会话所需的最小用户标识。
 type Claims struct {
-	UserID   uint   `json:"user_id"`
-	Username string `json:"username"`
+	UserID         uint   `json:"user_id"`
+	Username       string `json:"username"`
+	SessionVersion uint   `json:"session_version"`
 	jwt.RegisteredClaims
 }
 
@@ -25,12 +26,13 @@ func NewJWTService(secret string, expire time.Duration) *JWTService {
 	return &JWTService{secret: []byte(secret), expire: expire}
 }
 
-// Sign 为已登录用户生成带过期时间的令牌。
-func (s *JWTService) Sign(userID uint, username string) (string, error) {
+// Sign 为已登录用户生成带过期时间的令牌，并带上当前会话版本用于失效旧登录态。
+func (s *JWTService) Sign(userID uint, username string, sessionVersion uint) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		UserID:   userID,
-		Username: username,
+		UserID:         userID,
+		Username:       username,
+		SessionVersion: sessionVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.expire)),

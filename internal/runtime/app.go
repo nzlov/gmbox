@@ -116,7 +116,7 @@ func initAdmin(db *gorm.DB, cfg *appcfg.Config) error {
 	if err != nil {
 		return fmt.Errorf("生成管理员密码哈希失败: %w", err)
 	}
-	admin := &model.User{Username: cfg.Auth.InitUsername, PasswordHash: hash}
+	admin := &model.User{Username: cfg.Auth.InitUsername, PasswordHash: hash, SessionVersion: 1}
 	if err := db.Create(admin).Error; err != nil {
 		return fmt.Errorf("初始化管理员失败: %w", err)
 	}
