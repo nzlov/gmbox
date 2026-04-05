@@ -1,86 +1,138 @@
 <template>
-  <q-page class="q-pa-md">
-    <div class="row justify-end q-mb-md">
-      <q-btn outline color="primary" no-caps icon="arrow_back" label="返回列表" @click="router.push('/inbox')" />
-    </div>
+  <q-page class="message-detail-page q-pa-md">
+    <div class="detail-shell">
+      <div class="detail-topbar q-mb-md">
+        <q-btn flat color="primary" no-caps icon="arrow_back" label="返回列表" @click="router.push('/inbox')" />
+      </div>
 
-    <q-card v-if="detail" bordered>
-      <q-card-section class="row q-col-gutter-lg items-start">
-        <div class="col-12 col-lg">
-          <div class="text-h6 text-weight-bold">{{ currentMessage.subject || '(无主题)' }}</div>
-          <div class="text-body2 text-grey-7 q-mt-xs">{{ formatSender(currentMessage) }}</div>
-          <div class="text-body2 text-grey-7 q-mt-xs">{{ formatAccountEmail(currentMessage.account_email) }}</div>
-          <div class="row q-gutter-sm q-mt-md">
-            <q-badge color="grey-3" text-color="dark">{{ currentMessage.folder || '未知文件夹' }}</q-badge>
-            <q-badge v-if="currentMessage.has_attachment" color="grey-3" text-color="dark">含附件</q-badge>
+      <q-card v-if="detail" bordered flat class="detail-card">
+        <q-card-section class="detail-header">
+          <div class="detail-header-top">
+            <div class="detail-subject-wrap">
+              <div class="detail-subject">{{ currentMessage.subject || '(无主题)' }}</div>
+              <div class="detail-badges q-mt-sm">
+                <q-badge color="grey-2" text-color="grey-8">{{ currentMessage.folder || '未知文件夹' }}</q-badge>
+                <q-badge v-if="currentMessage.has_attachment" color="grey-2" text-color="grey-8">含附件</q-badge>
+                <q-badge v-if="!currentMessage.is_read" color="blue-1" text-color="primary">未读</q-badge>
+              </div>
+            </div>
+
+            <div class="detail-toolbar">
+              <q-btn flat round dense color="primary" icon="reply" @click="openReplyDialog">
+                <q-tooltip>回复邮件</q-tooltip>
+              </q-btn>
+              <q-btn flat round dense color="primary" :icon="currentMessage.is_read ? 'mark_email_unread' : 'mark_email_read'" @click="markRead(!currentMessage.is_read)">
+                <q-tooltip>{{ currentMessage.is_read ? '标记未读' : '标记已读' }}</q-tooltip>
+              </q-btn>
+              <q-btn flat round dense color="secondary" :icon="showRemoteImages ? 'hide_image' : 'image'" @click="toggleImages">
+                <q-tooltip>{{ showRemoteImages ? '隐藏远程图片' : '显示图片' }}</q-tooltip>
+              </q-btn>
+              <q-btn flat round dense color="negative" icon="delete" @click="deleteMessage">
+                <q-tooltip>删除邮件</q-tooltip>
+              </q-btn>
+            </div>
           </div>
-        </div>
-        <div class="col-12 col-lg-auto text-grey-7">
-          {{ formatDate(currentMessage.sent_at) }}
-        </div>
-      </q-card-section>
 
-      <q-card-section class="row q-col-gutter-sm">
-        <div class="col-12 col-xl-8 row q-gutter-sm">
-          <q-btn color="primary" unelevated no-caps icon="reply" label="回复邮件" @click="openReplyDialog" />
-          <q-btn outline color="primary" no-caps label="标记已读" @click="markRead(true)" />
-          <q-btn outline color="primary" no-caps label="标记未读" @click="markRead(false)" />
-          <q-btn outline color="negative" no-caps label="删除邮件" @click="deleteMessage" />
-          <q-btn outline color="secondary" no-caps :label="showRemoteImages ? '隐藏图片' : '显示图片'" @click="toggleImages" />
-        </div>
-        <div class="col-12 col-xl-4 row q-gutter-sm justify-end">
-          <q-select
-            v-model="targetFolder"
-            outlined
-            dense
-            emit-value
-            map-options
-            :options="mailboxOptions"
-            label="目标文件夹"
-            style="min-width: 220px"
-          />
-          <q-btn color="primary" unelevated no-caps label="移动邮件" @click="moveMessage" />
-        </div>
-      </q-card-section>
+          <div class="detail-meta q-mt-lg">
+            <q-avatar size="44px" color="indigo-1" text-color="primary" class="detail-avatar">
+              {{ senderInitials }}
+            </q-avatar>
+            <div class="detail-meta-main">
+              <div class="detail-from-row">
+                <div class="detail-from-name">{{ formatSender(currentMessage) }}</div>
+                <div class="detail-date">{{ formatDate(currentMessage.sent_at) }}</div>
+              </div>
+              <div class="detail-recipient-line">收件人：{{ formatRecipientLine(currentMessage) }}</div>
+              <div class="detail-account-line">接收邮箱：{{ currentMessage.account_email || '未知' }}</div>
+            </div>
+          </div>
 
-      <q-card-section v-if="message">
-        <q-banner rounded :class="isError ? 'bg-red-1 text-negative' : 'bg-green-1 text-positive'">
-          {{ message }}
-        </q-banner>
-      </q-card-section>
-
-      <q-separator />
-
-      <q-card-section>
-        <article v-if="sanitizedHtml" class="mail-html" v-html="sanitizedHtml"></article>
-        <article v-else class="mail-text">{{ safeBody }}</article>
-      </q-card-section>
-
-      <template v-if="currentAttachments.length > 0">
-        <q-separator />
-        <q-card-section>
-          <div class="text-subtitle1 text-weight-bold q-mb-md">附件</div>
-          <q-list bordered separator>
-            <q-item v-for="attachment in currentAttachments" :key="attachment.id" clickable @click="downloadAttachment(attachment.id)">
-              <q-item-section avatar>
-                <q-icon name="attach_file" color="primary" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>{{ attachment.file_name }}</q-item-label>
-                <q-item-label caption>{{ attachment.content_type || '未知类型' }}</q-item-label>
-              </q-item-section>
-              <q-item-section side>
-                <div class="text-caption text-grey-7">{{ formatSize(attachment.size) }}</div>
-              </q-item-section>
-            </q-item>
-          </q-list>
+          <div class="detail-primary-actions q-mt-lg">
+            <q-btn color="primary" unelevated no-caps icon="reply" label="回复" @click="openReplyDialog" />
+            <q-btn outline color="primary" no-caps icon="forward" label="转发" @click="openForwardDialog" />
+          </div>
         </q-card-section>
-      </template>
-    </q-card>
 
-    <q-banner v-else-if="message" rounded class="bg-red-1 text-negative">
-      {{ message }}
-    </q-banner>
+        <q-separator />
+
+        <q-card-section class="detail-secondary-actions">
+          <div class="detail-move-controls">
+            <q-select
+              v-model="targetFolder"
+              outlined
+              dense
+              emit-value
+              map-options
+              :options="mailboxOptions"
+              label="移动到文件夹"
+              class="detail-folder-select"
+            />
+            <q-btn color="primary" unelevated no-caps label="移动邮件" @click="moveMessage" />
+          </div>
+        </q-card-section>
+
+        <q-card-section v-if="message" class="q-pt-none">
+          <q-banner rounded :class="isError ? 'bg-red-1 text-negative' : 'bg-green-1 text-positive'">
+            {{ message }}
+          </q-banner>
+        </q-card-section>
+
+        <q-card-section v-if="!showRemoteImages && hasRemoteImages" class="q-pt-none">
+          <q-banner rounded class="bg-blue-1 text-primary">
+            邮件包含远程图片，默认未加载。点击右上角图片按钮后才会显示。
+          </q-banner>
+        </q-card-section>
+
+        <q-separator />
+
+        <q-card-section class="detail-body-section">
+          <div v-if="bodyModeOptions.length > 1" class="detail-body-toolbar q-mb-md">
+            <q-btn-toggle
+              v-model="bodyMode"
+              unelevated
+              no-caps
+              toggle-color="primary"
+              color="grey-2"
+              text-color="grey-8"
+              :options="bodyModeOptions"
+            />
+          </div>
+          <div class="detail-body-wrap">
+            <article v-if="shouldShowHtml" class="mail-html detail-body-content" v-html="sanitizedHtml"></article>
+            <article v-else class="mail-text detail-body-content">{{ safeBody }}</article>
+          </div>
+        </q-card-section>
+
+        <template v-if="currentAttachments.length > 0">
+          <q-separator />
+          <q-card-section class="detail-attachments-section">
+            <div class="text-subtitle1 text-weight-bold q-mb-md">附件</div>
+            <div class="detail-attachments-grid">
+              <button
+                v-for="attachment in currentAttachments"
+                :key="attachment.id"
+                type="button"
+                class="detail-attachment-card"
+                @click="downloadAttachment(attachment.id)"
+              >
+                <div class="detail-attachment-icon">
+                  <q-icon name="attach_file" color="primary" size="22px" />
+                </div>
+                <div class="detail-attachment-main">
+                  <div class="detail-attachment-name">{{ attachment.file_name }}</div>
+                  <div class="detail-attachment-meta">{{ attachment.content_type || '未知类型' }}</div>
+                </div>
+                <div class="detail-attachment-size">{{ formatSize(attachment.size) }}</div>
+              </button>
+            </div>
+          </q-card-section>
+        </template>
+      </q-card>
+
+      <q-banner v-else-if="message" rounded class="bg-red-1 text-negative">
+        {{ message }}
+      </q-banner>
+    </div>
 
     <ComposeDialog v-model="showComposeDialog" :preset="composePreset" />
   </q-page>
@@ -102,8 +154,19 @@ const targetFolder = ref('')
 const message = ref('')
 const isError = ref(false)
 const showRemoteImages = ref(false)
+const bodyMode = ref<'html' | 'text'>('html')
 const showComposeDialog = ref(false)
-const composePreset = ref<{ title?: string; account_id?: number; to?: string; subject?: string; body?: string } | null>(null)
+const composePreset = ref<{
+  title?: string
+  account_id?: number
+  to?: string
+  subject?: string
+  body?: string
+  is_html?: boolean
+  notice?: string
+  attachment_ids?: number[]
+  attachments?: AttachmentItem[]
+} | null>(null)
 
 const currentMessage = computed<MessageItem>(() =>
   detail.value?.message ?? {
@@ -124,6 +187,19 @@ const currentMessage = computed<MessageItem>(() =>
   },
 )
 const currentAttachments = computed<AttachmentItem[]>(() => detail.value?.attachments ?? [])
+const senderInitials = computed(() => buildInitials(currentMessage.value.from_name || currentMessage.value.from_address || '?'))
+const hasRemoteImages = computed(() => /<img\b/i.test(detail.value?.body?.html_body ?? ''))
+const hasHtmlBody = computed(() => Boolean(extractMailHtml(detail.value?.body?.html_body ?? '')))
+const bodyModeOptions = computed(() => {
+  if (!hasHtmlBody.value) {
+    return [{ label: '纯文本', value: 'text' as const }]
+  }
+  return [
+    { label: 'HTML', value: 'html' as const },
+    { label: '纯文本', value: 'text' as const },
+  ]
+})
+const shouldShowHtml = computed(() => hasHtmlBody.value && bodyMode.value === 'html' && Boolean(sanitizedHtml.value))
 const sanitizedHtml = computed(() => {
   const html = extractMailHtml(detail.value?.body?.html_body ?? '')
   if (!html) {
@@ -171,6 +247,7 @@ async function loadDetail() {
     } else {
       mailboxes.value = []
     }
+    bodyMode.value = extractMailHtml(detail.value?.body?.html_body ?? '') ? 'html' : 'text'
     showRemoteImages.value = false
   } catch (err) {
     isError.value = true
@@ -252,6 +329,51 @@ function openReplyDialog() {
   showComposeDialog.value = true
 }
 
+// openForwardDialog 复用写信弹窗转发当前正文和附件上下文，减少用户手动复制内容。
+function openForwardDialog() {
+  const forwardContent = buildForwardContent()
+  composePreset.value = {
+    title: '转发邮件',
+    account_id: currentMessage.value.account_id,
+    subject: currentMessage.value.subject.startsWith('Fwd:') ? currentMessage.value.subject : `Fwd: ${currentMessage.value.subject || '(无主题)'}`,
+    body: forwardContent.body,
+    is_html: forwardContent.isHTML,
+    notice: currentAttachments.value.length > 0 ? '以下附件会随本次转发一起发送。' : '',
+    attachment_ids: currentAttachments.value.map((attachment) => attachment.id),
+    attachments: currentAttachments.value,
+  }
+  showComposeDialog.value = true
+}
+
+// buildForwardContent 优先保留 HTML 正文结构，避免转发富文本邮件时丢失表格和链接。
+function buildForwardContent() {
+  if (hasHtmlBody.value && sanitizedHtml.value) {
+    return {
+      isHTML: true,
+      body: buildForwardHTMLBody(sanitizedHtml.value),
+    }
+  }
+  return {
+    isHTML: false,
+    body: `\n\n--- 转发邮件 ---\n发件人：${formatSender(currentMessage.value)}\n收件时间：${formatDate(currentMessage.value.sent_at)}\n收件人：${formatRecipientLine(currentMessage.value)}\n\n${safeBody.value}`,
+  }
+}
+
+// buildForwardHTMLBody 为转发草稿拼接一段结构化头信息，同时保留原始 HTML 正文。
+function buildForwardHTMLBody(htmlBody: string) {
+  return `<div><br></div><div><br></div><div>--- 转发邮件 ---</div><div>发件人：${escapeHtml(formatSender(currentMessage.value))}</div><div>收件时间：${escapeHtml(formatDate(currentMessage.value.sent_at))}</div><div>收件人：${escapeHtml(formatRecipientLine(currentMessage.value))}</div><div><br></div>${htmlBody}`
+}
+
+// escapeHtml 避免转发头信息里的地址和主题被当作 HTML 片段解析。
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 // resolveReplyAddress 在已发送邮件场景优先回复原始收件人，避免把邮件回给自己。
 function resolveReplyAddress(item: MessageItem) {
   const sender = item.from_address?.trim().toLowerCase()
@@ -290,6 +412,29 @@ function formatAccountEmail(value: string) {
     return 'To: 未知'
   }
   return `To: ${address}`
+}
+
+// formatRecipientLine 优先展示原始收件人，避免详情页只看到接入邮箱看不出真实投递对象。
+function formatRecipientLine(item: MessageItem) {
+  const recipients = item.to_addresses?.trim()
+  if (recipients) {
+    return recipients
+  }
+  return formatAccountEmail(item.account_email).replace(/^To:\s*/, '')
+}
+
+// buildInitials 用首字母头像强化发件人识别，接近常见邮箱客户端的阅读体验。
+function buildInitials(value: string) {
+  const text = value.trim()
+  if (!text) {
+    return '?'
+  }
+  const parts = text
+    .replace(/<.*?>/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+  const initials = parts.slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('')
+  return initials || text.slice(0, 1).toUpperCase()
 }
 
 // formatSize 输出更易读的附件大小。
@@ -346,3 +491,254 @@ function hardenSanitizedHtml(html: string) {
 
 onMounted(loadDetail)
 </script>
+
+<style scoped>
+.message-detail-page {
+  background: #f5f7fb;
+}
+
+.detail-shell {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.detail-topbar {
+  display: flex;
+  align-items: center;
+}
+
+.detail-card {
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+}
+
+.detail-header {
+  padding: 28px 32px 22px;
+}
+
+.detail-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.detail-subject-wrap {
+  min-width: 0;
+  flex: 1;
+}
+
+.detail-subject {
+  font-size: 34px;
+  line-height: 1.2;
+  font-weight: 400;
+  color: #1d4ed8;
+  word-break: break-word;
+}
+
+.detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-meta {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.detail-primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-avatar {
+  flex: none;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.detail-meta-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.detail-from-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.detail-from-name {
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.detail-date,
+.detail-recipient-line,
+.detail-account-line {
+  font-size: 14px;
+  color: #64748b;
+}
+
+.detail-recipient-line,
+.detail-account-line {
+  margin-top: 4px;
+  word-break: break-word;
+}
+
+.detail-secondary-actions {
+  padding: 18px 32px;
+}
+
+.detail-move-controls {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-folder-select {
+  min-width: 240px;
+}
+
+.detail-body-section,
+.detail-attachments-section {
+  padding: 28px 32px 32px;
+}
+
+.detail-body-wrap,
+.detail-attachments-grid {
+  max-width: 760px;
+}
+
+.detail-body-toolbar {
+  max-width: 760px;
+}
+
+.detail-attachments-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-attachment-card {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #dbe4f0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.detail-attachment-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.12);
+  transform: translateY(-1px);
+}
+
+.detail-attachment-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: #eff6ff;
+  flex: none;
+}
+
+.detail-attachment-main {
+  min-width: 0;
+  flex: 1;
+  margin-left: 14px;
+}
+
+.detail-attachment-name {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.detail-attachment-meta,
+.detail-attachment-size {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.detail-attachment-meta {
+  margin-top: 2px;
+}
+
+.detail-attachment-size {
+  margin-left: 12px;
+  white-space: nowrap;
+}
+
+.detail-body-content {
+  font-size: 16px;
+}
+
+@media (max-width: 1023px) {
+  .detail-header,
+  .detail-secondary-actions,
+  .detail-body-section,
+  .detail-attachments-section {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .detail-subject {
+    font-size: 26px;
+  }
+
+  .detail-header-top,
+  .detail-from-row,
+  .detail-move-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .detail-primary-actions,
+  .detail-attachment-card {
+    align-items: stretch;
+  }
+
+  .detail-primary-actions,
+  .detail-attachment-card {
+    flex-direction: column;
+  }
+
+  .detail-attachment-main,
+  .detail-attachment-size {
+    margin-left: 0;
+    margin-top: 10px;
+  }
+
+  .detail-toolbar {
+    justify-content: flex-start;
+  }
+
+  .detail-folder-select {
+    min-width: 0;
+    width: 100%;
+  }
+}
+</style>

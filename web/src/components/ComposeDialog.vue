@@ -4,7 +4,7 @@
       <q-card-section class="row items-start justify-between q-col-gutter-md">
         <div class="col">
           <div class="text-h6 text-weight-bold">{{ dialogTitle }}</div>
-          <div class="text-body2 text-grey-7 q-mt-xs">使用已接入邮箱直接发信，支持新写邮件和按原邮件内容快速回复。</div>
+          <div class="text-body2 text-grey-7 q-mt-xs">使用已接入邮箱直接发信，支持新写邮件、回复和转发。</div>
         </div>
         <div class="col-auto">
           <q-btn flat round dense icon="close" @click="closeDialog" />
@@ -18,6 +18,10 @@
           {{ message }}
         </q-banner>
 
+        <q-banner v-if="presetNotice" rounded class="bg-blue-1 text-primary q-mb-md">
+          {{ presetNotice }}
+        </q-banner>
+
         <q-form class="row q-col-gutter-md" @submit.prevent="submit">
           <q-select v-model="form.account_id" class="col-12 col-lg-6" outlined emit-value map-options :options="accountOptions" label="发件邮箱" />
           <q-toggle v-model="form.is_html" class="col-12 col-lg-6" color="primary" label="HTML 正文" />
@@ -26,6 +30,25 @@
           <q-input v-model="form.cc" class="col-12 col-md-6" outlined label="抄送" />
           <q-input v-model="form.bcc" class="col-12 col-md-6" outlined label="密送" />
           <q-input v-model="form.subject" class="col-12" outlined label="主题" />
+
+          <div v-if="forwardedAttachments.length > 0" class="col-12">
+            <div class="text-subtitle2 text-weight-medium q-mb-sm">将随邮件一并转发以下附件</div>
+            <q-list bordered separator>
+              <q-item v-for="attachment in forwardedAttachments" :key="attachment.id">
+                <q-item-section avatar>
+                  <q-icon name="attach_file" color="primary" />
+                </q-item-section>
+                <q-item-section>
+                  <q-item-label>{{ attachment.file_name }}</q-item-label>
+                  <q-item-label caption>{{ attachment.content_type || '未知类型' }}</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-item-label caption>{{ formatSize(attachment.size) }}</q-item-label>
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </div>
+
           <q-input v-model="form.body" class="col-12" outlined autogrow type="textarea" label="正文" input-style="min-height: 260px" />
 
           <div class="col-12 row justify-end q-gutter-sm">
@@ -40,7 +63,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { request, type MailAccount } from '@/api'
+import { request, type AttachmentItem, type MailAccount } from '@/api'
 
 type ComposePreset = {
   title?: string
@@ -51,6 +74,9 @@ type ComposePreset = {
   subject?: string
   body?: string
   is_html?: boolean
+  notice?: string
+  attachment_ids?: number[]
+  attachments?: AttachmentItem[]
 }
 
 const props = defineProps<{
@@ -75,9 +101,12 @@ const form = reactive({
   subject: '',
   body: '',
   is_html: false,
+  attachment_ids: [] as number[],
 })
 
 const dialogTitle = computed(() => props.preset?.title?.trim() || '写信')
+const presetNotice = computed(() => props.preset?.notice?.trim() || '')
+const forwardedAttachments = computed(() => props.preset?.attachments ?? [])
 const accountOptions = computed(() => [
   { label: '选择发件邮箱', value: 0 },
   ...accounts.value.map((item) => ({ label: `${item.name} / ${item.email}`, value: item.id })),
@@ -99,6 +128,7 @@ function applyPreset() {
     subject: props.preset?.subject ?? '',
     body: props.preset?.body ?? '',
     is_html: props.preset?.is_html ?? false,
+    attachment_ids: [...(props.preset?.attachment_ids ?? [])],
   })
 }
 
@@ -128,6 +158,7 @@ async function submit() {
         subject: form.subject,
         body: form.body,
         is_html: form.is_html,
+        attachment_ids: form.attachment_ids,
       }),
     })
     message.value = '发送成功'
@@ -141,6 +172,17 @@ async function submit() {
 
 function closeDialog() {
   emit('update:modelValue', false)
+}
+
+// formatSize 输出更易读的附件体积，方便用户确认转发内容是否正确。
+function formatSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 watch(

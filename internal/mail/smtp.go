@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/smtp"
 	"strings"
@@ -16,13 +17,21 @@ import (
 
 // SendInput 描述前端写信页提交的发信请求。
 type SendInput struct {
-	AccountID uint     `json:"account_id" binding:"required"`
-	To        []string `json:"to" binding:"required,min=1"`
-	Cc        []string `json:"cc"`
-	Bcc       []string `json:"bcc"`
-	Subject   string   `json:"subject"`
-	Body      string   `json:"body" binding:"required"`
-	IsHTML    bool     `json:"is_html"`
+	AccountID     uint     `json:"account_id" binding:"required"`
+	To            []string `json:"to" binding:"required,min=1"`
+	Cc            []string `json:"cc"`
+	Bcc           []string `json:"bcc"`
+	Subject       string   `json:"subject"`
+	Body          string   `json:"body" binding:"required"`
+	IsHTML        bool     `json:"is_html"`
+	AttachmentIDs []uint   `json:"attachment_ids"`
+}
+
+// sendAttachment 保存待发送附件的元数据和文件内容，便于统一生成 MIME 报文。
+type sendAttachment struct {
+	FileName    string
+	ContentType string
+	Content     []byte
 }
 
 // Send 使用指定邮箱账户通过 SMTP 发送邮件。
@@ -35,15 +44,51 @@ func (s *Service) Send(ctx context.Context, input SendInput) error {
 	if err != nil {
 		return err
 	}
-	raw, recipients, err := buildSMTPMessage(account, input)
+	attachments, err := s.loadSendAttachments(input.AttachmentIDs)
+	if err != nil {
+		return err
+	}
+	raw, recipients, err := buildSMTPMessage(account, input, attachments)
 	if err != nil {
 		return err
 	}
 	return s.sendSMTPMessage(ctx, account, password, recipients, raw)
 }
 
+// loadSendAttachments 按前端传入顺序加载待转发附件，避免 MIME 中附件顺序错乱。
+func (s *Service) loadSendAttachments(ids []uint) ([]sendAttachment, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	attachments := make([]sendAttachment, 0, len(ids))
+	seen := make(map[uint]struct{}, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		attachment, content, err := s.DownloadAttachment(id)
+		if err != nil {
+			return nil, fmt.Errorf("读取转发附件失败: %w", err)
+		}
+		contentType := strings.TrimSpace(attachment.ContentType)
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		attachments = append(attachments, sendAttachment{
+			FileName:    attachment.FileName,
+			ContentType: contentType,
+			Content:     content,
+		})
+	}
+	return attachments, nil
+}
+
 // buildSMTPMessage 统一构造 MIME 邮件，避免各个入口各自拼接报文。
-func buildSMTPMessage(account model.MailAccount, input SendInput) ([]byte, []string, error) {
+func buildSMTPMessage(account model.MailAccount, input SendInput, attachments []sendAttachment) ([]byte, []string, error) {
 	var buffer bytes.Buffer
 	var header gomail.Header
 
@@ -70,22 +115,42 @@ func buildSMTPMessage(account model.MailAccount, input SendInput) ([]byte, []str
 		return nil, nil, fmt.Errorf("生成 Message-ID 失败: %w", err)
 	}
 
-	if input.IsHTML {
-		header.SetContentType("text/html", map[string]string{"charset": "utf-8"})
-	} else {
-		header.SetContentType("text/plain", map[string]string{"charset": "utf-8"})
-	}
+	if len(attachments) == 0 {
+		if input.IsHTML {
+			header.SetContentType("text/html", map[string]string{"charset": "utf-8"})
+		} else {
+			header.SetContentType("text/plain", map[string]string{"charset": "utf-8"})
+		}
 
-	bodyWriter, err := gomail.CreateSingleInlineWriter(&buffer, header)
-	if err != nil {
-		return nil, nil, fmt.Errorf("创建邮件正文失败: %w", err)
-	}
-	if _, err := bodyWriter.Write([]byte(input.Body)); err != nil {
-		_ = bodyWriter.Close()
-		return nil, nil, fmt.Errorf("写入邮件正文失败: %w", err)
-	}
-	if err := bodyWriter.Close(); err != nil {
-		return nil, nil, fmt.Errorf("关闭邮件写入器失败: %w", err)
+		bodyWriter, err := gomail.CreateSingleInlineWriter(&buffer, header)
+		if err != nil {
+			return nil, nil, fmt.Errorf("创建邮件正文失败: %w", err)
+		}
+		if _, err := bodyWriter.Write([]byte(input.Body)); err != nil {
+			_ = bodyWriter.Close()
+			return nil, nil, fmt.Errorf("写入邮件正文失败: %w", err)
+		}
+		if err := bodyWriter.Close(); err != nil {
+			return nil, nil, fmt.Errorf("关闭邮件写入器失败: %w", err)
+		}
+	} else {
+		messageWriter, err := gomail.CreateWriter(&buffer, header)
+		if err != nil {
+			return nil, nil, fmt.Errorf("创建带附件邮件失败: %w", err)
+		}
+		if err := writeSMTPInlinePart(messageWriter, input); err != nil {
+			_ = messageWriter.Close()
+			return nil, nil, err
+		}
+		for _, attachment := range attachments {
+			if err := writeSMTPAttachmentPart(messageWriter, attachment); err != nil {
+				_ = messageWriter.Close()
+				return nil, nil, err
+			}
+		}
+		if err := messageWriter.Close(); err != nil {
+			return nil, nil, fmt.Errorf("关闭带附件邮件失败: %w", err)
+		}
 	}
 
 	recipients := make([]string, 0, len(input.To)+len(input.Cc)+len(input.Bcc))
@@ -93,6 +158,47 @@ func buildSMTPMessage(account model.MailAccount, input SendInput) ([]byte, []str
 	recipients = append(recipients, flattenAddresses(ccAddrs)...)
 	recipients = append(recipients, flattenAddresses(bccAddrs)...)
 	return buffer.Bytes(), recipients, nil
+}
+
+// writeSMTPInlinePart 在 multipart 邮件中写入正文部分，保持无附件时的正文编码策略一致。
+func writeSMTPInlinePart(messageWriter *gomail.Writer, input SendInput) error {
+	var inlineHeader gomail.InlineHeader
+	if input.IsHTML {
+		inlineHeader.SetContentType("text/html", map[string]string{"charset": "utf-8"})
+	} else {
+		inlineHeader.SetContentType("text/plain", map[string]string{"charset": "utf-8"})
+	}
+	bodyWriter, err := messageWriter.CreateSingleInline(inlineHeader)
+	if err != nil {
+		return fmt.Errorf("创建邮件正文失败: %w", err)
+	}
+	if _, err := bodyWriter.Write([]byte(input.Body)); err != nil {
+		_ = bodyWriter.Close()
+		return fmt.Errorf("写入邮件正文失败: %w", err)
+	}
+	if err := bodyWriter.Close(); err != nil {
+		return fmt.Errorf("关闭邮件正文失败: %w", err)
+	}
+	return nil
+}
+
+// writeSMTPAttachmentPart 逐个写入附件，确保文件名和类型按原邮件元数据透传。
+func writeSMTPAttachmentPart(messageWriter *gomail.Writer, attachment sendAttachment) error {
+	var attachmentHeader gomail.AttachmentHeader
+	attachmentHeader.SetContentType(attachment.ContentType, nil)
+	attachmentHeader.SetFilename(attachment.FileName)
+	attachmentWriter, err := messageWriter.CreateAttachment(attachmentHeader)
+	if err != nil {
+		return fmt.Errorf("创建附件 %s 失败: %w", attachment.FileName, err)
+	}
+	if _, err := io.Copy(attachmentWriter, bytes.NewReader(attachment.Content)); err != nil {
+		_ = attachmentWriter.Close()
+		return fmt.Errorf("写入附件 %s 失败: %w", attachment.FileName, err)
+	}
+	if err := attachmentWriter.Close(); err != nil {
+		return fmt.Errorf("关闭附件 %s 失败: %w", attachment.FileName, err)
+	}
+	return nil
 }
 
 // sendSMTPMessage 兼容 SMTPS 和普通 SMTP/STARTTLS 两种常见服务形态。
