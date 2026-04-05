@@ -361,7 +361,7 @@ function buildForwardContent() {
 
 // buildForwardHTMLBody 为转发草稿拼接一段结构化头信息，同时保留原始 HTML 正文。
 function buildForwardHTMLBody(htmlBody: string) {
-  return `<div><br></div><div><br></div><div>--- 转发邮件 ---</div><div>发件人：${escapeHtml(formatSender(currentMessage.value))}</div><div>收件时间：${escapeHtml(formatDate(currentMessage.value.sent_at))}</div><div>收件人：${escapeHtml(formatRecipientLine(currentMessage.value))}</div><div><br></div>${htmlBody}`
+  return `<div data-gmbox-forward-meta><p>---</p><p>转发邮件</p><p>发件人：${escapeHtml(formatSender(currentMessage.value))}</p><p>收件时间：${escapeHtml(formatDate(currentMessage.value.sent_at))}</p><p>收件人：${escapeHtml(formatRecipientLine(currentMessage.value))}</p></div>${htmlBody}`
 }
 
 // escapeHtml 避免转发头信息里的地址和主题被当作 HTML 片段解析。
