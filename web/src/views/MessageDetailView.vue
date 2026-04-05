@@ -97,7 +97,7 @@
               :options="bodyModeOptions"
             />
           </div>
-          <div class="detail-body-wrap">
+          <div :class="shouldShowHtml ? 'detail-body-wrap detail-body-wrap-html' : 'detail-body-wrap'">
             <article v-if="shouldShowHtml" class="mail-html detail-body-content" v-html="sanitizedHtml"></article>
             <article v-else class="mail-text detail-body-content">{{ safeBody }}</article>
           </div>
@@ -623,6 +623,15 @@ onMounted(loadDetail)
 .detail-body-wrap,
 .detail-attachments-grid {
   max-width: 760px;
+}
+
+.detail-body-wrap-html {
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+.detail-body-wrap-html .detail-body-content {
+  margin: 0 auto;
 }
 
 .detail-body-toolbar {
