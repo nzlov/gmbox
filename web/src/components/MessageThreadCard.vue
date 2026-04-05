@@ -234,7 +234,7 @@ function emitReply() {
     account_id: message.value.account_id,
     to: resolveReplyAddress(message.value),
     subject: message.value.subject.startsWith('Re:') ? message.value.subject : `Re: ${message.value.subject || '(无主题)'}`,
-    body: `\n\n--- 原始邮件 ---\n发件人：${formatSender(message.value)}\n收件邮箱：${formatAccountEmail(message.value.account_email).replace(/^收件邮箱：/, '')}\n时间：${formatDate(message.value.sent_at)}\n\n${safeBody.value}`,
+    body: `\n\n--- 原始邮件 ---\n发件人：${formatSender(message.value)}\nTo: ${formatAccountEmail(message.value.account_email).replace(/^To:\s*/, '')}\n时间：${formatDate(message.value.sent_at)}\n\n${safeBody.value}`,
   })
 }
 
@@ -284,9 +284,9 @@ function formatSender(item: MessageItem) {
 function formatAccountEmail(value: string) {
   const address = value.trim()
   if (!address) {
-    return '收件邮箱：未知'
+    return 'To: 未知'
   }
-  return `收件邮箱：${address}`
+  return `To: ${address}`
 }
 
 function formatDate(value: string) {

@@ -247,7 +247,7 @@ function openReplyDialog() {
     account_id: currentMessage.value.account_id,
     to: resolveReplyAddress(currentMessage.value),
     subject: currentMessage.value.subject.startsWith('Re:') ? currentMessage.value.subject : `Re: ${currentMessage.value.subject || '(无主题)'}`,
-    body: `\n\n--- 原始邮件 ---\n发件人：${formatSender(currentMessage.value)}\n收件邮箱：${formatAccountEmail(currentMessage.value.account_email).replace(/^收件邮箱：/, '')}\n时间：${formatDate(currentMessage.value.sent_at)}\n\n${safeBody.value}`,
+    body: `\n\n--- 原始邮件 ---\n发件人：${formatSender(currentMessage.value)}\nTo: ${formatAccountEmail(currentMessage.value.account_email).replace(/^To:\s*/, '')}\n时间：${formatDate(currentMessage.value.sent_at)}\n\n${safeBody.value}`,
   }
   showComposeDialog.value = true
 }
@@ -287,9 +287,9 @@ function formatSender(item: MessageItem) {
 function formatAccountEmail(value: string) {
   const address = value.trim()
   if (!address) {
-    return '收件邮箱：未知'
+    return 'To: 未知'
   }
-  return `收件邮箱：${address}`
+  return `To: ${address}`
 }
 
 // formatSize 输出更易读的附件大小。
