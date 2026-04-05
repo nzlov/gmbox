@@ -9,6 +9,7 @@ import (
 	"net/http"
 	stdmail "net/mail"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -347,7 +348,7 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		if !ok {
 			return
 		}
-		if err := app.DB.Delete(account).Error; err != nil {
+		if err := deleteAccountCascade(app.DB, account.Model.ID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "删除邮箱失败"})
 			return
 		}
@@ -419,8 +420,13 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询邮件失败"})
 			return
 		}
+		items, err := buildMessageResponses(app.DB, messages)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "补充邮件账户信息失败"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
-			"items":     messages,
+			"items":     items,
 			"total":     total,
 			"page":      page,
 			"page_size": pageSize,
@@ -501,7 +507,12 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			end = len(messages)
 		}
 		messages = messages[start:end]
-		c.JSON(http.StatusOK, gin.H{"items": messages, "total": total, "page": page, "page_size": pageSize})
+		items, err := buildMessageResponses(app.DB, messages)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "补充联系人邮件账户信息失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "page": page, "page_size": pageSize})
 	})
 
 	protected.GET("/messages/:id", func(c *gin.Context) {
@@ -519,7 +530,12 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": message, "body": body, "attachments": attachments})
+		accountEmail, err := loadAccountEmail(app.DB, message.AccountID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询邮件所属邮箱失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": newMessageResponse(*message, accountEmail), "body": body, "attachments": attachments})
 	})
 
 	protected.POST("/messages/send", func(c *gin.Context) {
@@ -790,6 +806,12 @@ func requestBaseURL(c *gin.Context) string {
 
 var hexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
+// messageResponse 为消息接口补充所属接入邮箱，避免前端把原始收件人误展示成当前账户邮箱。
+type messageResponse struct {
+	model.Message
+	AccountEmail string `json:"account_email"`
+}
+
 // parsePageParams 统一解析分页参数，避免各接口重复维护边界判断。
 func parsePageParams(c *gin.Context, defaultPageSize int) (int, int) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -804,6 +826,123 @@ func parsePageParams(c *gin.Context, defaultPageSize int) (int, int) {
 		pageSize = 200
 	}
 	return page, pageSize
+}
+
+// buildMessageResponses 为一批邮件补齐账户邮箱，保证列表展示口径与实际接入账户一致。
+func buildMessageResponses(db *gorm.DB, messages []model.Message) ([]messageResponse, error) {
+	if len(messages) == 0 {
+		return []messageResponse{}, nil
+	}
+	accountEmails, err := loadAccountEmails(db, messages)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]messageResponse, 0, len(messages))
+	for _, item := range messages {
+		items = append(items, newMessageResponse(item, accountEmails[item.AccountID]))
+	}
+	return items, nil
+}
+
+// loadAccountEmails 批量读取账户邮箱，避免消息列表逐条查询带来额外数据库压力。
+func loadAccountEmails(db *gorm.DB, messages []model.Message) (map[uint]string, error) {
+	accountIDs := make([]uint, 0, len(messages))
+	seen := make(map[uint]struct{}, len(messages))
+	for _, item := range messages {
+		if _, ok := seen[item.AccountID]; ok {
+			continue
+		}
+		seen[item.AccountID] = struct{}{}
+		accountIDs = append(accountIDs, item.AccountID)
+	}
+	if len(accountIDs) == 0 {
+		return map[uint]string{}, nil
+	}
+	var accounts []struct {
+		ID    uint
+		Email string
+	}
+	if err := db.Model(&model.MailAccount{}).Select("id", "email").Where("id IN ?", accountIDs).Find(&accounts).Error; err != nil {
+		return nil, err
+	}
+	accountEmails := make(map[uint]string, len(accounts))
+	for _, item := range accounts {
+		accountEmails[item.ID] = item.Email
+	}
+	return accountEmails, nil
+}
+
+// loadAccountEmail 为详情页补齐所属接入邮箱。
+func loadAccountEmail(db *gorm.DB, accountID uint) (string, error) {
+	if accountID == 0 {
+		return "", nil
+	}
+	var account model.MailAccount
+	if err := db.Select("email").First(&account, accountID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	return account.Email, nil
+}
+
+// newMessageResponse 统一构造前端消息响应，避免多处手工拼装字段。
+func newMessageResponse(message model.Message, accountEmail string) messageResponse {
+	return messageResponse{Message: message, AccountEmail: accountEmail}
+}
+
+// deleteAccountCascade 在删除邮箱时一并清理邮件、正文、附件和同步记录，避免留下孤儿数据。
+func deleteAccountCascade(db *gorm.DB, accountID uint) error {
+	if accountID == 0 {
+		return nil
+	}
+	attachmentPaths := make([]string, 0)
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		var attachments []model.Attachment
+		if err := tx.
+			Table("attachments").
+			Joins("JOIN messages ON messages.id = attachments.message_id").
+			Where("messages.account_id = ?", accountID).
+			Find(&attachments).Error; err != nil {
+			return err
+		}
+		for _, item := range attachments {
+			if strings.TrimSpace(item.StoragePath) != "" {
+				attachmentPaths = append(attachmentPaths, item.StoragePath)
+			}
+		}
+
+		messageSubQuery := tx.Model(&model.Message{}).Select("id").Where("account_id = ?", accountID)
+		if err := tx.Where("message_id IN (?)", messageSubQuery).Unscoped().Delete(&model.Attachment{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("message_id IN (?)", messageSubQuery).Unscoped().Delete(&model.MessageBody{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("account_id = ?", accountID).Unscoped().Delete(&model.Message{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("account_id = ?", accountID).Unscoped().Delete(&model.Mailbox{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("account_id = ?", accountID).Unscoped().Delete(&model.SyncState{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("account_id = ?", accountID).Unscoped().Delete(&model.SyncLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Delete(&model.MailAccount{}, accountID).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, path := range attachmentPaths {
+		_ = os.Remove(path)
+	}
+	return nil
 }
 
 // loadThemePreference 统一兜底主题设置，避免前端首次进入时拿到空配置。

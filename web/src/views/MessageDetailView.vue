@@ -8,7 +8,8 @@
       <q-card-section class="row q-col-gutter-lg items-start">
         <div class="col-12 col-lg">
           <div class="text-h6 text-weight-bold">{{ currentMessage.subject || '(无主题)' }}</div>
-          <div class="text-body2 text-grey-7 q-mt-xs">{{ currentMessage.from_name || currentMessage.from_address || '未知发件人' }}</div>
+          <div class="text-body2 text-grey-7 q-mt-xs">{{ formatSender(currentMessage) }}</div>
+          <div class="text-body2 text-grey-7 q-mt-xs">{{ formatAccountEmail(currentMessage.account_email) }}</div>
           <div class="row q-gutter-sm q-mt-md">
             <q-badge color="grey-3" text-color="dark">{{ currentMessage.folder || '未知文件夹' }}</q-badge>
             <q-badge v-if="currentMessage.has_attachment" color="grey-3" text-color="dark">含附件</q-badge>
@@ -21,6 +22,7 @@
 
       <q-card-section class="row q-col-gutter-sm">
         <div class="col-12 col-xl-8 row q-gutter-sm">
+          <q-btn color="primary" unelevated no-caps icon="reply" label="回复邮件" @click="openReplyDialog" />
           <q-btn outline color="primary" no-caps label="标记已读" @click="markRead(true)" />
           <q-btn outline color="primary" no-caps label="标记未读" @click="markRead(false)" />
           <q-btn outline color="negative" no-caps label="删除邮件" @click="deleteMessage" />
@@ -79,6 +81,8 @@
     <q-banner v-else-if="message" rounded class="bg-red-1 text-negative">
       {{ message }}
     </q-banner>
+
+    <ComposeDialog v-model="showComposeDialog" :preset="composePreset" />
   </q-page>
 </template>
 
@@ -87,6 +91,7 @@ import DOMPurify from 'dompurify'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { request, type AttachmentItem, type MailboxItem, type MessageDetailResponse, type MessageItem } from '@/api'
+import ComposeDialog from '@/components/ComposeDialog.vue'
 import { extractMailHtml, extractMailText } from '@/utils/mailBody'
 
 const route = useRoute()
@@ -97,16 +102,20 @@ const targetFolder = ref('')
 const message = ref('')
 const isError = ref(false)
 const showRemoteImages = ref(false)
+const showComposeDialog = ref(false)
+const composePreset = ref<{ title?: string; account_id?: number; to?: string; subject?: string; body?: string } | null>(null)
 
 const currentMessage = computed<MessageItem>(() =>
   detail.value?.message ?? {
     id: 0,
     account_id: 0,
+    account_email: '',
     mailbox_id: 0,
     folder: '',
     subject: '',
     from_name: '',
     from_address: '',
+    to_addresses: '',
     snippet: '',
     is_read: false,
     is_deleted: false,
@@ -231,9 +240,56 @@ async function downloadAttachment(id: number) {
   URL.revokeObjectURL(url)
 }
 
+// openReplyDialog 复用写信弹窗生成回复草稿，保证详情页也能直接回信。
+function openReplyDialog() {
+  composePreset.value = {
+    title: '回复邮件',
+    account_id: currentMessage.value.account_id,
+    to: resolveReplyAddress(currentMessage.value),
+    subject: currentMessage.value.subject.startsWith('Re:') ? currentMessage.value.subject : `Re: ${currentMessage.value.subject || '(无主题)'}`,
+    body: `\n\n--- 原始邮件 ---\n发件人：${formatSender(currentMessage.value)}\n收件邮箱：${formatAccountEmail(currentMessage.value.account_email).replace(/^收件邮箱：/, '')}\n时间：${formatDate(currentMessage.value.sent_at)}\n\n${safeBody.value}`,
+  }
+  showComposeDialog.value = true
+}
+
+// resolveReplyAddress 在已发送邮件场景优先回复原始收件人，避免把邮件回给自己。
+function resolveReplyAddress(item: MessageItem) {
+  const sender = item.from_address?.trim().toLowerCase()
+  const accountEmail = item.account_email?.trim().toLowerCase()
+  if (sender && accountEmail && sender === accountEmail) {
+    return extractFirstAddress(item.to_addresses) || item.from_address
+  }
+  return item.from_address
+}
+
+// extractFirstAddress 尽量从 RFC822 风格列表里提取第一个邮箱地址，兼容名称包裹格式。
+function extractFirstAddress(value: string) {
+  const matched = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
+  return matched?.[0] ?? ''
+}
+
 // formatDate 统一处理时间显示。
 function formatDate(value: string) {
   return value ? new Date(value).toLocaleString('zh-CN') : '刚刚'
+}
+
+// formatSender 把发件人名称和邮箱合并展示，方便详情页快速确认来源。
+function formatSender(item: MessageItem) {
+  const name = item.from_name?.trim()
+  const address = item.from_address?.trim()
+  if (name && address && name !== address) {
+    return `${name} <${address}>`
+  }
+  return address || name || '未知发件人'
+}
+
+// formatAccountEmail 统一输出当前接入账户邮箱，避免详情页和列表页口径不一致。
+function formatAccountEmail(value: string) {
+  const address = value.trim()
+  if (!address) {
+    return '收件邮箱：未知'
+  }
+  return `收件邮箱：${address}`
 }
 
 // formatSize 输出更易读的附件大小。

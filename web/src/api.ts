@@ -64,11 +64,13 @@ export interface ThemePreference {
 export interface MessageItem {
   id: number
   account_id: number
+  account_email: string
   mailbox_id: number
   folder: string
   subject: string
   from_name: string
   from_address: string
+  to_addresses: string
   snippet: string
   is_read: boolean
   is_deleted: boolean

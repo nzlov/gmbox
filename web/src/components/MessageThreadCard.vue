@@ -4,7 +4,7 @@
       <div class="row items-start q-col-gutter-md no-wrap">
         <div class="col">
           <div :class="message.is_read ? 'text-subtitle2' : 'text-subtitle2 text-weight-bold'">{{ message.subject || '(无主题)' }}</div>
-          <div v-if="!hideSender" class="text-caption text-grey-7 q-mt-xs">{{ message.from_name || message.from_address || '未知发件人' }}</div>
+          <div v-if="!hideSender" class="text-caption text-grey-7 q-mt-xs">{{ formatSender(message) }}</div>
           <div class="text-caption text-grey-7 q-mt-xs">{{ message.snippet || '暂无摘要' }}</div>
           <div class="row q-gutter-sm q-mt-sm">
             <q-badge v-if="showFolder" color="grey-3" text-color="dark">{{ message.folder }}</q-badge>
@@ -12,7 +12,10 @@
             <q-badge v-if="!message.is_read" color="primary" text-color="white">未读</q-badge>
           </div>
         </div>
-        <div class="col-auto text-caption text-grey-6">{{ formatDate(message.sent_at) }}</div>
+        <div class="col-auto text-caption text-grey-6 message-meta">
+          <div>{{ formatDate(message.sent_at) }}</div>
+          <div class="q-mt-xs">{{ formatAccountEmail(message.account_email) }}</div>
+        </div>
       </div>
     </q-card-section>
 
@@ -93,7 +96,7 @@ const props = withDefaults(defineProps<{
   initialExpanded: false,
   collapsible: true,
   hideSender: false,
-  showReply: false,
+  showReply: true,
   showFolder: true,
 })
 
@@ -229,10 +232,26 @@ async function moveMessage() {
 function emitReply() {
   emit('reply', {
     account_id: message.value.account_id,
-    to: message.value.from_address,
+    to: resolveReplyAddress(message.value),
     subject: message.value.subject.startsWith('Re:') ? message.value.subject : `Re: ${message.value.subject || '(无主题)'}`,
-    body: `\n\n--- 原始邮件 ---\n发件人：${message.value.from_name || message.value.from_address}\n时间：${formatDate(message.value.sent_at)}\n\n${safeBody.value}`,
+    body: `\n\n--- 原始邮件 ---\n发件人：${formatSender(message.value)}\n收件邮箱：${formatAccountEmail(message.value.account_email).replace(/^收件邮箱：/, '')}\n时间：${formatDate(message.value.sent_at)}\n\n${safeBody.value}`,
   })
+}
+
+// resolveReplyAddress 在已发送邮件场景优先回复原始收件人，避免把邮件回给自己。
+function resolveReplyAddress(item: MessageItem) {
+  const sender = item.from_address?.trim().toLowerCase()
+  const accountEmail = item.account_email?.trim().toLowerCase()
+  if (sender && accountEmail && sender === accountEmail) {
+    return extractFirstAddress(item.to_addresses) || item.from_address
+  }
+  return item.from_address
+}
+
+// extractFirstAddress 尽量从 RFC822 风格列表里提取第一个邮箱地址，兼容名称包裹格式。
+function extractFirstAddress(value: string) {
+  const matched = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
+  return matched?.[0] ?? ''
 }
 
 async function downloadAttachment(id: number, fileName: string) {
@@ -249,6 +268,25 @@ async function downloadAttachment(id: number, fileName: string) {
   link.download = fileName
   link.click()
   URL.revokeObjectURL(url)
+}
+
+// formatSender 把发件人名称和邮箱合并展示，减少列表里信息分散。
+function formatSender(item: MessageItem) {
+  const name = item.from_name?.trim()
+  const address = item.from_address?.trim()
+  if (name && address && name !== address) {
+    return `${name} <${address}>`
+  }
+  return address || name || '未知发件人'
+}
+
+// formatAccountEmail 统一输出当前接入账户邮箱，避免误用原始收件人列表。
+function formatAccountEmail(value: string) {
+  const address = value.trim()
+  if (!address) {
+    return '收件邮箱：未知'
+  }
+  return `收件邮箱：${address}`
 }
 
 function formatDate(value: string) {
@@ -321,5 +359,11 @@ onMounted(() => {
 <style scoped>
 .message-card + .message-card {
   margin-top: 12px;
+}
+
+.message-meta {
+  max-width: min(280px, 40vw);
+  text-align: right;
+  word-break: break-all;
 }
 </style>

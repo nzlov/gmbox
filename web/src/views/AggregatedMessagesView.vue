@@ -11,7 +11,7 @@
       <q-card-section>
         <q-banner v-if="error" rounded dense class="bg-red-1 text-negative q-mb-md">{{ error }}</q-banner>
         <div v-if="messages.length > 0">
-          <MessageThreadCard v-for="item in messages" :key="item.id" :message="item" show-folder @changed="refreshAll" @deleted="removeMessage(item.id)" />
+          <MessageThreadCard v-for="item in messages" :key="item.id" :message="item" show-folder @changed="refreshAll" @deleted="removeMessage(item.id)" @reply="openReplyDialog" />
           <q-infinite-scroll ref="infiniteRef" :offset="180" @load="loadMore">
             <template #loading>
               <div class="row justify-center q-my-md"><q-spinner color="primary" size="32px" /></div>
@@ -28,6 +28,8 @@
     <q-page-sticky position="bottom-right" :offset="[24, 24]">
       <q-btn round color="primary" icon="refresh" @click="refreshAll"><q-tooltip>刷新列表</q-tooltip></q-btn>
     </q-page-sticky>
+
+    <ComposeDialog v-model="showComposeDialog" :preset="composePreset" @sent="refreshAll" />
   </q-page>
 </template>
 
@@ -35,6 +37,7 @@
 import { onMounted, ref } from 'vue'
 import type { QInfiniteScroll } from 'quasar'
 import { request, type MessageItem, type MessageListResponse } from '@/api'
+import ComposeDialog from '@/components/ComposeDialog.vue'
 import MessageThreadCard from '@/components/MessageThreadCard.vue'
 
 const messages = ref<MessageItem[]>([])
@@ -43,6 +46,8 @@ const page = ref(1)
 const pageSize = 20
 const total = ref(0)
 const infiniteRef = ref<QInfiniteScroll | null>(null)
+const showComposeDialog = ref(false)
+const composePreset = ref<{ title?: string; account_id?: number; to?: string; subject?: string; body?: string } | null>(null)
 
 async function fetchPage(targetPage: number) {
   const response = await request<MessageListResponse>(`/api/messages?page=${targetPage}&page_size=${pageSize}`)
@@ -84,6 +89,12 @@ async function loadMore(index: number, done: (stop?: boolean) => void) {
 function removeMessage(messageID: number) {
   messages.value = messages.value.filter((item) => item.id !== messageID)
   total.value = Math.max(0, total.value - 1)
+}
+
+// openReplyDialog 让聚合列表展开后的详情也能直接进入回复流程。
+function openReplyDialog(payload: { account_id: number; to: string; subject: string; body: string }) {
+  composePreset.value = { title: '回复邮件', ...payload }
+  showComposeDialog.value = true
 }
 
 onMounted(refreshAll)
