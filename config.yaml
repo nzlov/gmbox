@@ -17,6 +17,10 @@ db:
   max_idle_conns: 5
   conn_max_lifetime: 1h
 
+log:
+  level: info
+  debug: false
+
 mail:
   sync_cron: "*/1 * * * *"
   max_concurrency: 5

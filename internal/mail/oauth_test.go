@@ -114,3 +114,22 @@ func TestRestoreSoftDeletedOAuthAccount(t *testing.T) {
 		t.Fatalf("restored.Name = %q, want 新账户", all[0].Name)
 	}
 }
+
+// TestRedactFormForLogMasksCodeVerifier 确保 PKCE 的 code_verifier 不会在调试日志中泄漏。
+func TestRedactFormForLogMasksCodeVerifier(t *testing.T) {
+	form := map[string][]string{
+		"code":          {"secret-code"},
+		"code_verifier": {"secret-verifier"},
+		"scope":         {microsoftAuthorizeScope},
+	}
+	redacted := redactFormForLog(form)
+	if redacted["code"] != "<redacted>" {
+		t.Fatalf("code = %q, want <redacted>", redacted["code"])
+	}
+	if redacted["code_verifier"] != "<redacted>" {
+		t.Fatalf("code_verifier = %q, want <redacted>", redacted["code_verifier"])
+	}
+	if redacted["scope"] != microsoftAuthorizeScope {
+		t.Fatalf("scope = %q, want %q", redacted["scope"], microsoftAuthorizeScope)
+	}
+}

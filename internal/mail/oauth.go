@@ -303,6 +303,7 @@ func (s *Service) exchangeMicrosoftToken(ctx context.Context, form url.Values) (
 	}
 	form.Set("client_id", s.cfg.MicrosoftOAuth.ClientID)
 	form.Set("client_secret", s.cfg.MicrosoftOAuth.ClientSecret)
+	s.debugProviderLog("微软 OAuth token 请求开始", "tenant", s.microsoftTenant(), "form", redactFormForLog(form))
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", s.microsoftTenant()), bytes.NewBufferString(form.Encode()))
 	if err != nil {
 		return nil, err
@@ -317,6 +318,7 @@ func (s *Service) exchangeMicrosoftToken(ctx context.Context, form url.Values) (
 	if err != nil {
 		return nil, fmt.Errorf("读取微软 token 响应失败: %w", err)
 	}
+	s.debugProviderLog("微软 OAuth token 请求完成", "tenant", s.microsoftTenant(), "status", response.StatusCode, "body", redactJSONBodyForLog(body))
 	if response.StatusCode >= http.StatusBadRequest {
 		return nil, fmt.Errorf("请求微软 token 失败: %s", strings.TrimSpace(string(body)))
 	}

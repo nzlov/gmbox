@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -80,7 +80,7 @@ func (a *App) Close() {
 	}
 	for i := len(a.closers) - 1; i >= 0; i-- {
 		if err := a.closers[i](); err != nil {
-			log.Printf("关闭资源失败: %v", err)
+			slog.Error("关闭资源失败", "err", err)
 		}
 	}
 }

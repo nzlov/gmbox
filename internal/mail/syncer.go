@@ -3,7 +3,7 @@ package mail
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -31,7 +31,7 @@ type Syncer struct {
 
 // NewSyncer 创建 cron 同步器。
 func NewSyncer(cfg *appcfg.Config, db *gorm.DB, mailer *Service) *Syncer {
-	logger := cron.PrintfLogger(log.Default())
+	logger := cron.PrintfLogger(slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo))
 	return &Syncer{
 		cfg:    cfg,
 		db:     db,

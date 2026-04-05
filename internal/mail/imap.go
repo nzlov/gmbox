@@ -23,7 +23,7 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 	if err != nil {
 		return nil, err
 	}
-	client, err := dialIMAP(account, password)
+	client, err := s.dialIMAP(account, password)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 		}
 		// LIST 解析失败通常意味着当前连接的读状态已经损坏，回退目录前先重连，避免后续命令继续复用坏连接。
 		_ = client.Logout().Wait()
-		client, err = dialIMAP(account, password)
+		client, err = s.dialIMAP(account, password)
 		if err != nil {
 			return nil, fmt.Errorf("IMAP 文件夹枚举失败后重连失败: %w", err)
 		}
@@ -53,6 +53,14 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 	totalNew := 0
 	for _, mailbox := range mailboxes {
 		count, maxUID, syncErr := s.syncIMAPMailbox(client, account, mailbox.Path, cursors[mailbox.Path], fetchBody)
+		if syncErr != nil && shouldRetryIMAPMailboxSelect(account, syncErr) {
+			_ = client.Logout().Wait()
+			client, err = s.dialIMAP(account, password)
+			if err != nil {
+				return nil, fmt.Errorf("文件夹 %s 首次选择失败后重连 IMAP 失败: %w", mailbox.Path, err)
+			}
+			count, maxUID, syncErr = s.syncIMAPMailbox(client, account, mailbox.Path, cursors[mailbox.Path], fetchBody)
+		}
 		if syncErr != nil {
 			return nil, syncErr
 		}
@@ -169,44 +177,63 @@ func (s *Service) syncIMAPMailbox(client *imapclient.Client, account model.MailA
 	return total, maxUID, nil
 }
 
+// shouldRetryIMAPMailboxSelect 仅为微软 OAuth 的已认证未连邮箱会话做一次重连重试，避免瞬时会话异常直接打断整轮同步。
+func shouldRetryIMAPMailboxSelect(account model.MailAccount, err error) bool {
+	if err == nil {
+		return false
+	}
+	if normalizeAuthType(account.AuthType) != "oauth" || normalizeProvider(account.Provider) != "outlook" {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "authenticated but not connected")
+}
+
 // dialIMAP 按账户配置建立 IMAP 连接并完成认证。
-func dialIMAP(account model.MailAccount, password string) (*imapclient.Client, error) {
+func (s *Service) dialIMAP(account model.MailAccount, password string) (*imapclient.Client, error) {
 	username := strings.TrimSpace(account.Username)
 	if username == "" {
 		username = strings.TrimSpace(account.Email)
 	}
 	if normalizeAuthType(account.AuthType) == "oauth" {
-		client, err := dialIMAPOAuth(account, username, password)
+		client, err := s.dialIMAPOAuth(account, username, password)
 		if err != nil {
 			return nil, err
 		}
 		return client, nil
 	}
-	client, err := openIMAPClient(account)
+	client, err := s.openIMAPClient(account)
 	if err != nil {
 		return nil, err
 	}
+	s.debugProviderLog("IMAP 密码登录开始", "email", account.Email, "host", account.IMAPHost, "username", username)
 	if err := client.Login(username, password).Wait(); err != nil {
 		_ = client.Logout().Wait()
 		return nil, fmt.Errorf("IMAP 登录失败: %w", err)
 	}
+	s.debugProviderLog("IMAP 密码登录成功", "email", account.Email, "host", account.IMAPHost)
 	return client, nil
 }
 
 // openIMAPClient 统一创建 IMAP 连接，避免认证重试时复制拨号逻辑。
-func openIMAPClient(account model.MailAccount) (*imapclient.Client, error) {
+func (s *Service) openIMAPClient(account model.MailAccount) (*imapclient.Client, error) {
 	addr := fmt.Sprintf("%s:%d", account.IMAPHost, account.IMAPPort)
 	var client *imapclient.Client
 	var err error
+	options := &imapclient.Options{DebugWriter: s.newIMAPDebugWriter(account)}
+	s.debugProviderLog("连接 IMAP", "email", account.Email, "host", account.IMAPHost, "port", account.IMAPPort, "tls", account.UseTLS)
 	if account.UseTLS {
 		dialer := &net.Dialer{Timeout: 15 * time.Second}
-		client, err = imapclient.DialTLS(addr, &imapclient.Options{TLSConfig: &tls.Config{ServerName: account.IMAPHost, MinVersion: tls.VersionTLS12}, Dialer: dialer})
+		options.TLSConfig = &tls.Config{ServerName: account.IMAPHost, MinVersion: tls.VersionTLS12}
+		options.Dialer = dialer
+		client, err = imapclient.DialTLS(addr, options)
 	} else {
-		client, err = imapclient.DialInsecure(addr, nil)
+		client, err = imapclient.DialInsecure(addr, options)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("连接 IMAP 失败: %w", err)
 	}
+	s.debugProviderLog("连接 IMAP 成功", "email", account.Email, "host", account.IMAPHost, "port", account.IMAPPort)
 	return client, nil
 }
 
@@ -225,8 +252,8 @@ func imapOAuthMechanismOrder(account model.MailAccount) []string {
 }
 
 // dialIMAPOAuth 根据服务端能力按优先级尝试 OAuth 机制，并在失败时自动重连回退。
-func dialIMAPOAuth(account model.MailAccount, username string, token string) (*imapclient.Client, error) {
-	probeClient, err := openIMAPClient(account)
+func (s *Service) dialIMAPOAuth(account model.MailAccount, username string, token string) (*imapclient.Client, error) {
+	probeClient, err := s.openIMAPClient(account)
 	if err != nil {
 		return nil, err
 	}
@@ -235,16 +262,19 @@ func dialIMAPOAuth(account model.MailAccount, username string, token string) (*i
 
 	var failureMessages []string
 	for _, attempt := range attempts {
-		client, err := openIMAPClient(account)
+		client, err := s.openIMAPClient(account)
 		if err != nil {
 			failureMessages = append(failureMessages, fmt.Sprintf("%s 连接失败: %v", attempt.name, err))
 			continue
 		}
+		s.debugProviderLog("IMAP OAuth 认证开始", "email", account.Email, "host", account.IMAPHost, "mechanism", attempt.name, "username", username)
 		if err := attempt.auth(client); err != nil {
+			s.debugProviderLog("IMAP OAuth 认证失败", "email", account.Email, "host", account.IMAPHost, "mechanism", attempt.name, "err", err)
 			failureMessages = append(failureMessages, fmt.Sprintf("%s 失败: %v", attempt.name, err))
 			_ = client.Logout().Wait()
 			continue
 		}
+		s.debugProviderLog("IMAP OAuth 认证成功", "email", account.Email, "host", account.IMAPHost, "mechanism", attempt.name)
 		return client, nil
 	}
 	if len(failureMessages) == 0 {

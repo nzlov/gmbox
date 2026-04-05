@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	stdmail "net/mail"
 	"net/url"
@@ -24,7 +25,9 @@ import (
 
 // NewRouter 组装 API、鉴权中间件和前端静态资源路由。
 func NewRouter(app *runtime.App, assets fs.FS) *gin.Engine {
-	router := gin.Default()
+	router := gin.New()
+	router.Use(slogRequestLogger(app))
+	router.Use(gin.Recovery())
 
 	api := router.Group("/api")
 	registerPublic(api, app)
@@ -32,6 +35,48 @@ func NewRouter(app *runtime.App, assets fs.FS) *gin.Engine {
 
 	registerFrontend(router, assets)
 	return router
+}
+
+// slogRequestLogger 使用统一结构化日志记录 HTTP 请求，便于与后端任务日志按等级集中排查。
+func slogRequestLogger(app *runtime.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		startedAt := time.Now()
+		c.Next()
+
+		attrs := []any{
+			"method", c.Request.Method,
+			"path", c.Request.URL.Path,
+			"status", c.Writer.Status(),
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"client_ip", c.ClientIP(),
+		}
+		if app != nil && app.Config != nil && app.Config.DebugMode() {
+			attrs = append(attrs, "query", redactQueryForLog(c.Request.URL), "user_agent", c.Request.UserAgent())
+		}
+		if c.Writer.Status() >= http.StatusInternalServerError {
+			slog.Error("HTTP 请求完成", attrs...)
+			return
+		}
+		if c.Writer.Status() >= http.StatusBadRequest {
+			slog.Warn("HTTP 请求完成", attrs...)
+			return
+		}
+		slog.Info("HTTP 请求完成", attrs...)
+	}
+}
+
+// redactQueryForLog 脱敏 URL 查询参数中的一次性凭证，避免调试日志泄漏 OAuth 敏感信息。
+func redactQueryForLog(target *url.URL) string {
+	if target == nil {
+		return ""
+	}
+	query := target.Query()
+	for _, key := range []string{"code", "state", "access_token", "refresh_token", "code_verifier"} {
+		if _, ok := query[key]; ok {
+			query.Set(key, "<redacted>")
+		}
+	}
+	return query.Encode()
 }
 
 // registerPublic 注册登录等无需鉴权的接口。

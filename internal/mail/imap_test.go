@@ -200,3 +200,17 @@ func TestSelectIMAPOAuthMechanismsPrefersDeclaredXOAUTH2(t *testing.T) {
 		t.Fatalf("selected[1] = %q, want %q", selected[1], imapOAuthMechOAuthBearer)
 	}
 }
+
+// TestShouldRetryIMAPMailboxSelectForOutlookOAuth 确保仅对微软 OAuth 的邮箱会话未连接错误触发一次重连重试。
+func TestShouldRetryIMAPMailboxSelectForOutlookOAuth(t *testing.T) {
+	err := errors.New("选择文件夹 INBOX 失败: imap: BAD User is authenticated but not connected.")
+	if !shouldRetryIMAPMailboxSelect(model.MailAccount{Provider: "outlook", AuthType: "oauth"}, err) {
+		t.Fatalf("expected retry for outlook oauth mailbox select error")
+	}
+	if shouldRetryIMAPMailboxSelect(model.MailAccount{Provider: "gmail", AuthType: "oauth"}, err) {
+		t.Fatalf("did not expect retry for non-outlook provider")
+	}
+	if shouldRetryIMAPMailboxSelect(model.MailAccount{Provider: "outlook", AuthType: "password"}, err) {
+		t.Fatalf("did not expect retry for non-oauth auth type")
+	}
+}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ type Config struct {
 	App            AppConfig            `yaml:"app"`
 	Auth           AuthConfig           `yaml:"auth"`
 	DB             DBConfig             `yaml:"db"`
+	Log            LogConfig            `yaml:"log"`
 	Mail           MailConfig           `yaml:"mail"`
 	Frontend       FrontendConfig       `yaml:"frontend"`
 	MicrosoftOAuth MicrosoftOAuthConfig `yaml:"microsoft_oauth"`
@@ -43,6 +45,12 @@ type DBConfig struct {
 	MaxOpenConns    int    `yaml:"max_open_conns"`
 	MaxIdleConns    int    `yaml:"max_idle_conns"`
 	ConnMaxLifetime string `yaml:"conn_max_lifetime"`
+}
+
+// LogConfig 保存结构化日志相关配置。
+type LogConfig struct {
+	Level string `yaml:"level"`
+	Debug bool   `yaml:"debug"`
 }
 
 // MailConfig 保存邮件同步相关配置。
@@ -104,6 +112,28 @@ func (c Config) ConnLifetimeDuration() time.Duration {
 	return d
 }
 
+// DebugMode 返回是否开启调试日志模式；开启后统一放宽为 debug 等级并打印服务商交互日志。
+func (c Config) DebugMode() bool {
+	return c.Log.Debug || strings.EqualFold(strings.TrimSpace(c.Log.Level), "debug")
+}
+
+// SlogLevel 将配置中的日志等级转换为 slog 级别。
+func (c Config) SlogLevel() slog.Level {
+	if c.DebugMode() {
+		return slog.LevelDebug
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Log.Level)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
 // defaults 提供可回落的默认配置。
 func defaults() *Config {
 	return &Config{
@@ -125,6 +155,10 @@ func defaults() *Config {
 			MaxOpenConns:    10,
 			MaxIdleConns:    5,
 			ConnMaxLifetime: "1h",
+		},
+		Log: LogConfig{
+			Level: "info",
+			Debug: false,
 		},
 		Mail: MailConfig{
 			SyncCron:       "*/1 * * * *",
@@ -152,11 +186,13 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.Auth.CookieName, os.Getenv("AUTH_COOKIE_NAME"))
 	setString(&cfg.DB.Driver, os.Getenv("DB_DRIVER"))
 	setString(&cfg.DB.DSN, os.Getenv("DB_DSN"))
+	setString(&cfg.Log.Level, os.Getenv("LOG_LEVEL"))
 	setString(&cfg.Mail.SyncCron, os.Getenv("MAIL_SYNC_CRON"))
 
 	setInt(&cfg.DB.MaxOpenConns, os.Getenv("DB_MAX_OPEN_CONNS"))
 	setInt(&cfg.DB.MaxIdleConns, os.Getenv("DB_MAX_IDLE_CONNS"))
 	setString(&cfg.DB.ConnMaxLifetime, os.Getenv("DB_CONN_MAX_LIFETIME"))
+	setBool(&cfg.Log.Debug, os.Getenv("LOG_DEBUG"))
 	setInt(&cfg.Mail.MaxConcurrency, os.Getenv("MAIL_MAX_CONCURRENCY"))
 	setBool(&cfg.Mail.FetchBody, os.Getenv("MAIL_FETCH_BODY"))
 	setInt(&cfg.Mail.PageSize, os.Getenv("MAIL_PAGE_SIZE"))

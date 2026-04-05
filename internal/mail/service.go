@@ -175,7 +175,7 @@ func (s *Service) TestConnection(ctx context.Context, account model.MailAccount)
 			return fmt.Errorf("POP3 连接失败: %w", err)
 		}
 	}
-	if err := probeSMTP(ctx, account); err != nil {
+	if err := s.probeSMTP(ctx, account); err != nil {
 		return fmt.Errorf("SMTP 连接失败: %w", err)
 	}
 	return nil
@@ -303,7 +303,7 @@ func (s *Service) fetchIMAPMessageBody(ctx context.Context, account model.MailAc
 	if err != nil {
 		return nil, err
 	}
-	client, err := dialIMAP(account, password)
+	client, err := s.dialIMAP(account, password)
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +430,7 @@ func (s *Service) SetMessageRead(ctx context.Context, messageID uint, isRead boo
 		if err != nil {
 			return err
 		}
-		client, err := dialIMAP(account, password)
+		client, err := s.dialIMAP(account, password)
 		if err != nil {
 			return err
 		}
@@ -469,7 +469,7 @@ func (s *Service) DeleteMessage(ctx context.Context, messageID uint) error {
 	if err != nil {
 		return err
 	}
-	client, err := dialIMAP(account, password)
+	client, err := s.dialIMAP(account, password)
 	if err != nil {
 		return err
 	}
@@ -505,7 +505,7 @@ func (s *Service) MoveMessage(ctx context.Context, messageID uint, targetFolder 
 	if err != nil {
 		return err
 	}
-	client, err := dialIMAP(account, password)
+	client, err := s.dialIMAP(account, password)
 	if err != nil {
 		return err
 	}
