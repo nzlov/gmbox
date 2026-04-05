@@ -40,7 +40,7 @@ make run
 
 默认地址：`http://127.0.0.1:8080`
 
-默认管理员：读取 `config.yaml` 中的 `auth.init_username` 和 `auth.init_password`，仅首次启动导入。
+默认管理员：首次启动时读取 `auth.init_username` 创建账号，密码由程序随机生成并写入启动日志，仅首次导入。
 
 ## 日志配置
 

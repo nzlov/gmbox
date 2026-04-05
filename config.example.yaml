@@ -6,7 +6,6 @@ app:
 
 auth:
   init_username: admin
-  init_password: admin123456
   jwt_expire: 24h
   cookie_name: gmbox_token
 

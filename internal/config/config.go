@@ -33,7 +33,6 @@ type AppConfig struct {
 // AuthConfig 保存认证相关配置。
 type AuthConfig struct {
 	InitUsername string `yaml:"init_username"`
-	InitPassword string `yaml:"init_password"`
 	JWTExpire    string `yaml:"jwt_expire"`
 	CookieName   string `yaml:"cookie_name"`
 }
@@ -144,7 +143,6 @@ func defaults() *Config {
 		},
 		Auth: AuthConfig{
 			InitUsername: "admin",
-			InitPassword: "admin123456",
 			JWTExpire:    "24h",
 			CookieName:   "gmbox_token",
 		},
@@ -179,7 +177,6 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.App.Env, os.Getenv("APP_ENV"))
 	setString(&cfg.App.SecretKey, os.Getenv("APP_SECRET_KEY"))
 	setString(&cfg.Auth.InitUsername, os.Getenv("AUTH_INIT_USERNAME"))
-	setString(&cfg.Auth.InitPassword, os.Getenv("AUTH_INIT_PASSWORD"))
 	setString(&cfg.Auth.JWTExpire, os.Getenv("AUTH_JWT_EXPIRE"))
 	setString(&cfg.Auth.CookieName, os.Getenv("AUTH_COOKIE_NAME"))
 	setString(&cfg.DB.Driver, os.Getenv("DB_DRIVER"))

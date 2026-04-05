@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -103,7 +105,7 @@ func migrate(db *gorm.DB) error {
 	return nil
 }
 
-// initAdmin 仅在用户表为空时导入配置中的默认管理员。
+// initAdmin 仅在用户表为空时创建默认管理员，并把随机密码输出到日志方便首次登录。
 func initAdmin(db *gorm.DB, cfg *appcfg.Config) error {
 	var count int64
 	if err := db.Model(&model.User{}).Count(&count).Error; err != nil {
@@ -112,7 +114,11 @@ func initAdmin(db *gorm.DB, cfg *appcfg.Config) error {
 	if count > 0 {
 		return nil
 	}
-	hash, err := auth.HashPassword(cfg.Auth.InitPassword)
+	password, err := generateRandomPassword(18)
+	if err != nil {
+		return fmt.Errorf("生成管理员随机密码失败: %w", err)
+	}
+	hash, err := auth.HashPassword(password)
 	if err != nil {
 		return fmt.Errorf("生成管理员密码哈希失败: %w", err)
 	}
@@ -120,7 +126,30 @@ func initAdmin(db *gorm.DB, cfg *appcfg.Config) error {
 	if err := db.Create(admin).Error; err != nil {
 		return fmt.Errorf("初始化管理员失败: %w", err)
 	}
+	reportInitAdminPassword(admin.Username, password)
 	return nil
+}
+
+// generateRandomPassword 使用系统安全随机源生成可直接复制的初始密码，避免默认弱口令进入部署环境。
+func generateRandomPassword(length int) (string, error) {
+	if length < 8 {
+		length = 8
+	}
+	buf := make([]byte, length)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	password := base64.RawURLEncoding.EncodeToString(buf)
+	if len(password) > length {
+		password = password[:length]
+	}
+	return password, nil
+}
+
+// reportInitAdminPassword 同时写结构化日志和标准错误，避免高日志级别时丢失首次登录凭据。
+func reportInitAdminPassword(username string, password string) {
+	slog.Info("默认管理员初始化完成，请妥善保存首次登录密码", "username", username, "password", password)
+	_, _ = fmt.Fprintf(os.Stderr, "默认管理员初始化完成，请妥善保存首次登录密码 username=%s password=%s\n", username, password)
 }
 
 // ensureDataDir 提前创建 sqlite 所需目录，避免首次启动因路径不存在失败。
