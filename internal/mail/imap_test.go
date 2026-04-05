@@ -3,6 +3,7 @@ package mail
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,5 +213,61 @@ func TestShouldRetryIMAPMailboxSelectForOutlookOAuth(t *testing.T) {
 	}
 	if shouldRetryIMAPMailboxSelect(model.MailAccount{Provider: "outlook", AuthType: "password"}, err) {
 		t.Fatalf("did not expect retry for non-oauth auth type")
+	}
+}
+
+// TestDecorateIMAPOAuthErrorUsesOutlookResponseCode 确保 Outlook 返回非标准带引号错误码时，日志中的响应码会被翻译成人可读错误。
+func TestDecorateIMAPOAuthErrorUsesOutlookResponseCode(t *testing.T) {
+	service := newTestMailService(t)
+	account := model.MailAccount{Provider: "outlook", Email: "test@example.com", IMAPHost: "outlook.office365.com"}
+	service.rememberIMAPDebugLine(account, `T2 OK [Error="UserDisabled" AuthResult=27] AUTHENTICATE completed.`)
+	err := service.decorateIMAPOAuthError(account, errors.New(`in resp-text: imapwire: expected ']', got "\""`))
+	if err == nil {
+		t.Fatalf("expected translated error")
+	}
+	if !strings.Contains(err.Error(), "UserDisabled") {
+		t.Fatalf("err = %q, want contains UserDisabled", err.Error())
+	}
+	if !strings.Contains(err.Error(), "未启用 IMAP") && !strings.Contains(err.Error(), "服务端限制") {
+		t.Fatalf("err = %q, want readable outlook hint", err.Error())
+	}
+}
+
+// TestDecorateIMAPOAuthErrorKeepsUnrelatedErrors 确保普通认证失败仍保留原始错误，避免掩盖非 Outlook 的真实问题。
+func TestDecorateIMAPOAuthErrorKeepsUnrelatedErrors(t *testing.T) {
+	service := newTestMailService(t)
+	original := errors.New("imap: BAD Command Argument Error. 12")
+	err := service.decorateIMAPOAuthError(model.MailAccount{Provider: "gmail"}, original)
+	if !errors.Is(err, original) {
+		t.Fatalf("err = %v, want original error", err)
+	}
+}
+
+// TestDecorateIMAPOAuthErrorUsesLatestOutlookResponseCode 确保同一账号多次认证失败时优先使用最近一条响应，避免旧错误码串到新重试上。
+func TestDecorateIMAPOAuthErrorUsesLatestOutlookResponseCode(t *testing.T) {
+	service := newTestMailService(t)
+	account := model.MailAccount{Provider: "outlook", Email: "test@example.com", IMAPHost: "outlook.office365.com"}
+	service.rememberIMAPDebugLine(account, `T2 OK [Error="OldError" AuthResult=1] AUTHENTICATE completed.`)
+	service.rememberIMAPDebugLine(account, `T3 OK [Error="UserDisabled" AuthResult=27] AUTHENTICATE completed.`)
+	err := service.decorateIMAPOAuthError(account, errors.New(`in resp-text: imapwire: expected ']', got "`))
+	if err == nil {
+		t.Fatalf("expected translated error")
+	}
+	if !strings.Contains(err.Error(), "UserDisabled") {
+		t.Fatalf("err = %q, want contains latest code UserDisabled", err.Error())
+	}
+	if strings.Contains(err.Error(), "OldError") {
+		t.Fatalf("err = %q, should not use stale code", err.Error())
+	}
+}
+
+// TestClearIMAPDebugLinesRemovesCachedLines 确保新一轮认证前可以清空旧交互，避免不同机制重试彼此污染错误上下文。
+func TestClearIMAPDebugLinesRemovesCachedLines(t *testing.T) {
+	service := newTestMailService(t)
+	account := model.MailAccount{Provider: "outlook", Email: "test@example.com", IMAPHost: "outlook.office365.com"}
+	service.rememberIMAPDebugLine(account, `T2 OK [Error="UserDisabled" AuthResult=27] AUTHENTICATE completed.`)
+	service.clearIMAPDebugLines(account)
+	if lines := service.recentIMAPDebugLines(account); len(lines) != 0 {
+		t.Fatalf("len(lines) = %d, want 0", len(lines))
 	}
 }

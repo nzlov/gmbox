@@ -63,9 +63,76 @@ func (w *imapDebugWriter) Write(p []byte) (int, error) {
 			}
 			return len(p), err
 		}
-		w.service.debugProviderLog("IMAP 原始交互", "provider", w.account.Provider, "email", w.account.Email, "host", w.account.IMAPHost, "payload", sanitizeIMAPDebugLine(line))
+		sanitized := sanitizeIMAPDebugLine(line)
+		w.service.rememberIMAPDebugLine(w.account, sanitized)
+		w.service.debugProviderLog("IMAP 原始交互", "provider", w.account.Provider, "email", w.account.Email, "host", w.account.IMAPHost, "payload", sanitized)
 	}
 	return len(p), nil
+}
+
+// rememberIMAPDebugLine 仅保留最近几条脱敏后的 IMAP 交互，便于后续把解析错误映射成服务端实际错误。
+func (s *Service) rememberIMAPDebugLine(account model.MailAccount, line string) {
+	if s == nil {
+		return
+	}
+	key := imapDebugKey(account)
+	if key == "" || strings.TrimSpace(line) == "" {
+		return
+	}
+	s.imapDebugMu.Lock()
+	defer s.imapDebugMu.Unlock()
+	if s.imapDebugLines == nil {
+		s.imapDebugLines = make(map[string][]string)
+	}
+	lines := append(s.imapDebugLines[key], line)
+	if len(lines) > 12 {
+		lines = append([]string(nil), lines[len(lines)-12:]...)
+	}
+	s.imapDebugLines[key] = lines
+}
+
+// recentIMAPDebugLines 返回指定账户最近的 IMAP 原始交互，供错误翻译逻辑读取。
+func (s *Service) recentIMAPDebugLines(account model.MailAccount) []string {
+	if s == nil {
+		return nil
+	}
+	key := imapDebugKey(account)
+	if key == "" {
+		return nil
+	}
+	s.imapDebugMu.Lock()
+	defer s.imapDebugMu.Unlock()
+	lines := s.imapDebugLines[key]
+	if len(lines) == 0 {
+		return nil
+	}
+	return append([]string(nil), lines...)
+}
+
+// clearIMAPDebugLines 在新一轮认证前清空旧交互，避免多次重试时把历史错误码误判成当前失败原因。
+func (s *Service) clearIMAPDebugLines(account model.MailAccount) {
+	if s == nil {
+		return
+	}
+	key := imapDebugKey(account)
+	if key == "" {
+		return
+	}
+	s.imapDebugMu.Lock()
+	defer s.imapDebugMu.Unlock()
+	if s.imapDebugLines == nil {
+		return
+	}
+	delete(s.imapDebugLines, key)
+}
+
+func imapDebugKey(account model.MailAccount) string {
+	email := strings.ToLower(strings.TrimSpace(account.Email))
+	host := strings.ToLower(strings.TrimSpace(account.IMAPHost))
+	if email == "" && host == "" {
+		return ""
+	}
+	return email + "|" + host
 }
 
 // sanitizeIMAPDebugLine 脱敏 IMAP 认证报文中的敏感内容，避免 access token 直接落日志。

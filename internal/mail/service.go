@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -26,6 +27,10 @@ type Service struct {
 	db     *gorm.DB
 	crypto *crypto.AESService
 	cfg    *appcfg.Config
+
+	// 保存最近几条 IMAP 原始交互，便于把服务端的非标准响应转换成更可读的错误。
+	imapDebugMu    sync.Mutex
+	imapDebugLines map[string][]string
 }
 
 // NewService 创建邮件服务实例。
@@ -40,6 +45,8 @@ func (s *Service) WithDB(db *gorm.DB) *Service {
 	}
 	clone := *s
 	clone.db = db
+	clone.imapDebugMu = sync.Mutex{}
+	clone.imapDebugLines = nil
 	return &clone
 }
 

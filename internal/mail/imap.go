@@ -211,6 +211,10 @@ func (s *Service) dialIMAP(account model.MailAccount, password string) (*imapcli
 		_ = client.Logout().Wait()
 		return nil, fmt.Errorf("IMAP 登录失败: %w", err)
 	}
+	if err := waitIMAPPostAuthReady(client); err != nil {
+		_ = client.Logout().Wait()
+		return nil, fmt.Errorf("IMAP 登录后能力协商失败: %w", err)
+	}
 	s.debugProviderLog("IMAP 密码登录成功", "email", account.Email, "host", account.IMAPHost)
 	return client, nil
 }
@@ -262,6 +266,7 @@ func (s *Service) dialIMAPOAuth(account model.MailAccount, username string, toke
 
 	var failureMessages []string
 	for _, attempt := range attempts {
+		s.clearIMAPDebugLines(account)
 		client, err := s.openIMAPClient(account)
 		if err != nil {
 			failureMessages = append(failureMessages, fmt.Sprintf("%s 连接失败: %v", attempt.name, err))
@@ -269,6 +274,14 @@ func (s *Service) dialIMAPOAuth(account model.MailAccount, username string, toke
 		}
 		s.debugProviderLog("IMAP OAuth 认证开始", "email", account.Email, "host", account.IMAPHost, "mechanism", attempt.name, "username", username)
 		if err := attempt.auth(client); err != nil {
+			err = s.decorateIMAPOAuthError(account, err)
+			s.debugProviderLog("IMAP OAuth 认证失败", "email", account.Email, "host", account.IMAPHost, "mechanism", attempt.name, "err", err)
+			failureMessages = append(failureMessages, fmt.Sprintf("%s 失败: %v", attempt.name, err))
+			_ = client.Logout().Wait()
+			continue
+		}
+		if err := waitIMAPPostAuthReady(client); err != nil {
+			err = fmt.Errorf("认证后能力协商失败: %w", err)
 			s.debugProviderLog("IMAP OAuth 认证失败", "email", account.Email, "host", account.IMAPHost, "mechanism", attempt.name, "err", err)
 			failureMessages = append(failureMessages, fmt.Sprintf("%s 失败: %v", attempt.name, err))
 			_ = client.Logout().Wait()
@@ -330,6 +343,55 @@ func selectIMAPOAuthMechanisms(caps imap.CapSet, account model.MailAccount) []st
 		appendMechanism(name)
 	}
 	return orderedNames
+}
+
+// waitIMAPPostAuthReady 等待 go-imap 在认证后自动触发的 CAPABILITY 完成，避免后续命令和能力刷新并发导致时序异常。
+func waitIMAPPostAuthReady(client *imapclient.Client) error {
+	if client == nil {
+		return fmt.Errorf("IMAP 客户端为空")
+	}
+	if caps := client.Caps(); caps == nil {
+		return fmt.Errorf("未获取到服务端能力")
+	}
+	return nil
+}
+
+// decorateIMAPOAuthError 尽量把 Outlook 的非标准认证响应转换成可读错误，避免只暴露底层解析异常。
+func (s *Service) decorateIMAPOAuthError(account model.MailAccount, err error) error {
+	if err == nil {
+		return nil
+	}
+	if normalizeProvider(account.Provider) != "outlook" {
+		return err
+	}
+	message := err.Error()
+	if !strings.Contains(message, "in resp-text: imapwire: expected ']'") {
+		return err
+	}
+	lines := s.recentIMAPDebugLines(account)
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		code := outlookIMAPAuthErrorCode(line)
+		if code == "" {
+			continue
+		}
+		return fmt.Errorf("Outlook IMAP 返回 %s，当前邮箱可能未启用 IMAP 或被服务端限制", code)
+	}
+	return fmt.Errorf("Outlook IMAP 返回了非标准认证响应: %w", err)
+}
+
+func outlookIMAPAuthErrorCode(line string) string {
+	marker := `Error="`
+	start := strings.Index(line, marker)
+	if start < 0 {
+		return ""
+	}
+	start += len(marker)
+	end := strings.Index(line[start:], `"`)
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(line[start : start+end])
 }
 
 // upsertMessage 根据账户和协议唯一标识保存邮件，避免重复落库。
