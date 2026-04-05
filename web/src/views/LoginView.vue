@@ -20,11 +20,6 @@
               {{ error }}
             </q-banner>
 
-            <q-separator class="gmbox-block-gap-lg" />
-
-            <div class="text-body2 text-grey-7">
-              首次启动会导入默认管理员，之后统一以数据库中的管理员密码校验。
-            </div>
           </q-card-section>
         </q-card>
       </q-page>
