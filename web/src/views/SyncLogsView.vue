@@ -3,12 +3,26 @@
     <div class="gmbox-page-shell">
     <q-card bordered>
       <q-card-section class="row items-center justify-between gmbox-col-gap-md">
-        <div class="col">
+        <div class="col-12 col-md">
           <div class="text-h6 text-weight-bold">同步日志</div>
           <div class="text-body2 text-grey-7 gmbox-section-hint">按时间倒序查看邮箱同步历史，点击行可展开详细结果。</div>
         </div>
         <div class="col-12 col-md-4">
-          <q-select v-model="selectedAccountID" outlined dense emit-value map-options :options="accountOptions" label="筛选邮箱" @update:model-value="loadLogs(1)" />
+          <q-select
+            v-model="selectedAccountID"
+            outlined
+            dense
+            use-input
+            input-debounce="0"
+            fill-input
+            hide-selected
+            emit-value
+            map-options
+            :options="accountOptions"
+            label="筛选邮箱"
+            @filter="filterAccounts"
+            @update:model-value="loadLogs(1)"
+          />
         </div>
       </q-card-section>
 
@@ -68,6 +82,7 @@ import { request, type MailAccount, type SyncLogItem, type SyncLogListResponse }
 const accounts = ref<MailAccount[]>([])
 const logs = ref<SyncLogItem[]>([])
 const selectedAccountID = ref('')
+const accountFilter = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -81,7 +96,15 @@ const pageSizeOptions = [
 ]
 const accountOptions = computed(() => [
   { label: '全部邮箱', value: '' },
-  ...accounts.value.map((item) => ({ label: `${item.name} / ${item.email}`, value: String(item.id) })),
+  ...accounts.value
+    .filter((account) => {
+      if (!accountFilter.value.trim()) {
+        return true
+      }
+      const nextKeyword = accountFilter.value.trim().toLowerCase()
+      return `${account.name} ${account.email}`.toLowerCase().includes(nextKeyword)
+    })
+    .map((item) => ({ label: `${item.name} / ${item.email}`, value: String(item.id) })),
 ])
 
 async function loadAccounts() {
@@ -107,6 +130,12 @@ async function loadLogs(nextPage = page.value) {
 
 function formatDate(value: string) {
   return value ? new Date(value).toLocaleString('zh-CN') : '刚刚'
+}
+
+function filterAccounts(value: string, update: (callbackFn: () => void) => void) {
+  update(() => {
+    accountFilter.value = value
+  })
 }
 
 onMounted(async () => {

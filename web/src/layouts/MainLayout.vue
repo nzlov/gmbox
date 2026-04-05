@@ -200,7 +200,13 @@ function applyPreset(name: string) {
   if (!preset) {
     return
   }
-  Object.assign(draftTheme, preset)
+  Object.assign(draftTheme, {
+    theme_name: preset.name,
+    theme_mode: preset.theme_mode,
+    primary_color: preset.primary_color,
+    secondary_color: preset.secondary_color,
+    accent_color: preset.accent_color,
+  })
 }
 
 // isPresetActive 按完整主题配置判断当前激活卡片，避免颜色或模式改动后高亮状态滞留在旧主题名上。

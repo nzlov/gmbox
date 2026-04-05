@@ -3,13 +3,6 @@
     <div class="gmbox-page-shell">
     <q-card bordered>
       <q-card-section>
-        <div class="text-h6 text-weight-bold">聚合消息</div>
-        <div class="text-body2 text-grey-7 gmbox-section-hint">按时间倒序显示所有邮箱、所有文件夹中的邮件。</div>
-      </q-card-section>
-
-      <q-separator />
-
-      <q-card-section>
         <q-banner v-if="error" rounded dense class="gmbox-banner-error gmbox-banner-gap">{{ error }}</q-banner>
         <div v-if="messages.length > 0">
           <MessageThreadCard v-for="item in messages" :key="item.id" :message="item" show-folder @changed="refreshAll" @deleted="removeMessage(item.id)" @reply="openReplyDialog" />
