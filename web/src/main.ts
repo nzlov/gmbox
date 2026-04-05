@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import { Quasar } from 'quasar'
+import { Notify, Quasar } from 'quasar'
 import quasarLang from 'quasar/lang/zh-CN'
 import App from './App.vue'
 import router from './router'
@@ -14,6 +14,9 @@ applyThemePreference(themeState)
 createApp(App)
   .use(router)
   .use(Quasar, {
+    plugins: {
+      Notify,
+    },
     lang: quasarLang,
     config: {
       brand: {
