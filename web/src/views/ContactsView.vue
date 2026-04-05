@@ -1,8 +1,9 @@
 <template>
-  <q-page class="q-pa-md">
-    <div class="row q-col-gutter-md contacts-layout">
+  <q-page class="gmbox-page">
+    <div class="gmbox-page-shell">
+    <div class="row gmbox-col-gap-md contacts-layout">
       <q-card bordered class="col-12 col-lg-auto contacts-sidebar-card">
-        <q-card-section class="row q-col-gutter-sm items-center">
+        <q-card-section class="row gmbox-col-gap-sm items-center">
           <div class="col">
             <q-input v-model.trim="contactKeyword" outlined dense label="搜索发件人" />
           </div>
@@ -22,7 +23,7 @@
       </q-card>
 
       <q-card bordered class="col-12 col-lg">
-        <q-card-section class="row items-center justify-between q-col-gutter-md">
+        <q-card-section class="row items-center justify-between gmbox-col-gap-md">
           <div class="col">
             <div class="text-h6 text-weight-bold">{{ selectedAddress ? selectedContactName : '联系人邮件' }}</div>
             <div class="text-body2 text-grey-7">{{ selectedAddress || '请选择左侧联系人后查看邮件列表' }}</div>
@@ -32,26 +33,26 @@
         <q-separator />
 
         <q-card-section>
-          <q-banner v-if="error" rounded dense class="bg-red-1 text-negative q-mb-md">{{ error }}</q-banner>
+          <q-banner v-if="error" rounded dense class="gmbox-banner-error gmbox-banner-gap">{{ error }}</q-banner>
           <div v-if="selectedAddress && messages.length > 0">
             <MessageThreadCard v-for="item in messages" :key="item.id" :message="item" :initial-expanded="true" :collapsible="false" hide-sender show-reply :show-folder="!selectedAddress" @changed="loadMessages(page)" @deleted="removeMessage(item.id)" @reply="openReplyDialog" />
           </div>
-          <div v-else-if="!selectedAddress" class="column items-center justify-center text-center q-py-xl text-grey-7">
-            <q-icon name="groups" size="56px" color="grey-5" />
-            <div class="text-subtitle1 q-mt-md">请选择联系人</div>
-            <div class="text-body2 q-mt-sm">仅在选择联系人后加载并显示邮件列表</div>
+          <div v-else-if="!selectedAddress" class="gmbox-empty-state">
+            <q-icon name="groups" size="var(--gmbox-empty-icon-size)" color="grey-5" />
+            <div class="text-subtitle1 gmbox-empty-title">请选择联系人</div>
+            <div class="text-body2 gmbox-empty-text">仅在选择联系人后加载并显示邮件列表</div>
           </div>
-          <div v-else class="column items-center justify-center text-center q-py-xl text-grey-7">
-            <q-icon name="group_off" size="56px" color="grey-5" />
-            <div class="text-subtitle1 q-mt-md">暂无联系人邮件</div>
+          <div v-else class="gmbox-empty-state">
+            <q-icon name="group_off" size="var(--gmbox-empty-icon-size)" color="grey-5" />
+            <div class="text-subtitle1 gmbox-empty-title">暂无联系人邮件</div>
           </div>
         </q-card-section>
 
         <q-separator />
 
-        <q-card-section class="row items-center justify-center q-gutter-sm">
+        <q-card-section class="row items-center justify-center gmbox-inline-gap-sm">
           <q-btn outline color="primary" no-caps :disable="!selectedAddress || page <= 1" label="上一页" @click="loadMessages(page - 1)" />
-          <q-select v-model="pageSize" outlined dense emit-value map-options :options="pageSizeOptions" style="min-width: 128px" :disable="!selectedAddress" @update:model-value="loadMessages(1)" />
+          <q-select v-model="pageSize" outlined dense emit-value map-options :options="pageSizeOptions" class="gmbox-page-size-select" :disable="!selectedAddress" @update:model-value="loadMessages(1)" />
           <div class="text-body2 text-grey-7">第 {{ page }} / {{ totalPages }} 页</div>
           <div class="text-body2 text-grey-7">共 {{ total }} 封</div>
           <q-btn outline color="primary" no-caps :disable="!selectedAddress || page >= totalPages" label="下一页" @click="loadMessages(page + 1)" />
@@ -61,9 +62,10 @@
 
     <ComposeDialog v-model="showComposeDialog" :preset="composePreset" @sent="loadMessages(page)" />
 
-    <q-page-sticky position="bottom-right" :offset="[24, 24]">
+    <q-page-sticky position="bottom-right" :offset="stickyOffset">
       <HoverActionFab primary-icon="edit_square" primary-label="写信" secondary-icon="refresh" secondary-label="刷新列表" @primary="openComposeForSelected" @secondary="refreshAll" />
     </q-page-sticky>
+    </div>
   </q-page>
 </template>
 
@@ -73,6 +75,7 @@ import { request, type ContactItem, type ContactListResponse, type MessageItem, 
 import ComposeDialog from '@/components/ComposeDialog.vue'
 import HoverActionFab from '@/components/HoverActionFab.vue'
 import MessageThreadCard from '@/components/MessageThreadCard.vue'
+import { useResponsiveStickyOffset } from '@/uiMetrics'
 
 const contacts = ref<ContactItem[]>([])
 const messages = ref<MessageItem[]>([])
@@ -84,6 +87,7 @@ const pageSize = ref(20)
 const total = ref(0)
 const showComposeDialog = ref(false)
 const composePreset = ref<{ title?: string; account_id?: number; to?: string; subject?: string; body?: string } | null>(null)
+const stickyOffset = useResponsiveStickyOffset()
 let keywordTimer: ReturnType<typeof setTimeout> | null = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
@@ -183,11 +187,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .contacts-sidebar-card {
-  width: 320px;
+  width: var(--gmbox-sidebar-width);
   max-width: 100%;
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 63.9375rem) {
   .contacts-layout {
     flex-direction: column;
   }

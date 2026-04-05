@@ -1,7 +1,7 @@
 <template>
-  <q-page class="message-detail-page q-pa-md">
+  <q-page class="message-detail-page gmbox-page">
     <div class="detail-shell">
-      <div class="detail-topbar q-mb-md">
+      <div class="detail-topbar gmbox-banner-gap">
         <q-btn flat color="primary" no-caps icon="arrow_back" label="返回列表" @click="router.push('/inbox')" />
       </div>
 
@@ -10,7 +10,7 @@
           <div class="detail-header-top">
             <div class="detail-subject-wrap">
               <div class="detail-subject">{{ currentMessage.subject || '(无主题)' }}</div>
-              <div class="detail-badges q-mt-sm">
+              <div class="detail-badges gmbox-top-gap-sm">
                 <q-badge color="grey-2" text-color="grey-8">{{ currentMessage.folder || '未知文件夹' }}</q-badge>
                 <q-badge v-if="currentMessage.has_attachment" color="grey-2" text-color="grey-8">含附件</q-badge>
                 <q-badge v-if="!currentMessage.is_read" color="blue-1" text-color="primary">未读</q-badge>
@@ -33,8 +33,8 @@
             </div>
           </div>
 
-          <div class="detail-meta q-mt-lg">
-            <q-avatar size="44px" color="indigo-1" text-color="primary" class="detail-avatar">
+          <div class="detail-meta gmbox-top-gap-lg">
+            <q-avatar size="var(--gmbox-avatar-size)" color="indigo-1" text-color="primary" class="detail-avatar">
               {{ senderInitials }}
             </q-avatar>
             <div class="detail-meta-main">
@@ -47,7 +47,7 @@
             </div>
           </div>
 
-          <div class="detail-primary-actions q-mt-lg">
+          <div class="detail-primary-actions gmbox-top-gap-lg">
             <q-btn color="primary" unelevated no-caps icon="reply" label="回复" @click="openReplyDialog" />
             <q-btn outline color="primary" no-caps icon="forward" label="转发" @click="openForwardDialog" />
           </div>
@@ -72,13 +72,13 @@
         </q-card-section>
 
         <q-card-section v-if="message" class="q-pt-none">
-          <q-banner rounded :class="isError ? 'bg-red-1 text-negative' : 'bg-green-1 text-positive'">
+          <q-banner rounded :class="isError ? 'gmbox-banner-error' : 'gmbox-banner-success'">
             {{ message }}
           </q-banner>
         </q-card-section>
 
         <q-card-section v-if="!showRemoteImages && hasRemoteImages" class="q-pt-none">
-          <q-banner rounded class="bg-blue-1 text-primary">
+          <q-banner rounded class="gmbox-banner-info">
             邮件包含远程图片，默认未加载。点击右上角图片按钮后才会显示。
           </q-banner>
         </q-card-section>
@@ -86,7 +86,7 @@
         <q-separator />
 
         <q-card-section class="detail-body-section">
-          <div v-if="bodyModeOptions.length > 1" class="detail-body-toolbar q-mb-md">
+          <div v-if="bodyModeOptions.length > 1" class="detail-body-toolbar gmbox-banner-gap">
             <q-btn-toggle
               v-model="bodyMode"
               unelevated
@@ -106,7 +106,7 @@
         <template v-if="currentAttachments.length > 0">
           <q-separator />
           <q-card-section class="detail-attachments-section">
-            <div class="text-subtitle1 text-weight-bold q-mb-md">附件</div>
+            <div class="text-subtitle1 text-weight-bold gmbox-banner-gap">附件</div>
             <div class="detail-attachments-grid">
               <button
                 v-for="attachment in currentAttachments"
@@ -116,7 +116,7 @@
                 @click="downloadAttachment(attachment.id)"
               >
                 <div class="detail-attachment-icon">
-                  <q-icon name="attach_file" color="primary" size="22px" />
+                  <q-icon name="attach_file" color="primary" size="var(--gmbox-icon-md)" />
                 </div>
                 <div class="detail-attachment-main">
                   <div class="detail-attachment-name">{{ attachment.file_name }}</div>
@@ -129,7 +129,7 @@
         </template>
       </q-card>
 
-      <q-banner v-else-if="message" rounded class="bg-red-1 text-negative">
+      <q-banner v-else-if="message" rounded class="gmbox-banner-error">
         {{ message }}
       </q-banner>
     </div>
@@ -498,7 +498,7 @@ onMounted(loadDetail)
 }
 
 .detail-shell {
-  max-width: 1120px;
+  max-width: var(--gmbox-detail-shell);
   margin: 0 auto;
 }
 
@@ -508,20 +508,20 @@ onMounted(loadDetail)
 }
 
 .detail-card {
-  border-radius: 18px;
+  border-radius: 1.125rem;
   background: #fff;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 0.625rem 1.75rem rgba(15, 23, 42, 0.08);
 }
 
 .detail-header {
-  padding: 28px 32px 22px;
+  padding: var(--gmbox-space-2xl) var(--gmbox-space-xl) var(--gmbox-space-lg);
 }
 
 .detail-header-top {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 24px;
+  gap: var(--gmbox-space-xl);
 }
 
 .detail-subject-wrap {
@@ -530,7 +530,7 @@ onMounted(loadDetail)
 }
 
 .detail-subject {
-  font-size: 34px;
+  font-size: clamp(1.75rem, 1.4rem + 1vw, 2.125rem);
   line-height: 1.2;
   font-weight: 400;
   color: #1d4ed8;
@@ -540,30 +540,30 @@ onMounted(loadDetail)
 .detail-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--gmbox-space-sm);
 }
 
 .detail-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: clamp(0.25rem, 0.2rem + 0.15vw, 0.375rem);
 }
 
 .detail-meta {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
+  gap: var(--gmbox-space-md);
 }
 
 .detail-primary-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--gmbox-space-md);
 }
 
 .detail-avatar {
   flex: none;
-  font-size: 16px;
+  font-size: var(--gmbox-font-body);
   font-weight: 600;
 }
 
@@ -576,12 +576,12 @@ onMounted(loadDetail)
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 16px;
+  gap: var(--gmbox-space-md);
 }
 
 .detail-from-name {
   min-width: 0;
-  font-size: 16px;
+  font-size: var(--gmbox-font-body);
   font-weight: 600;
   color: #0f172a;
   word-break: break-word;
@@ -590,43 +590,43 @@ onMounted(loadDetail)
 .detail-date,
 .detail-recipient-line,
 .detail-account-line {
-  font-size: 14px;
+  font-size: clamp(0.8125rem, 0.78rem + 0.12vw, 0.875rem);
   color: #64748b;
 }
 
 .detail-recipient-line,
 .detail-account-line {
-  margin-top: 4px;
+  margin-top: var(--gmbox-space-xs);
   word-break: break-word;
 }
 
 .detail-secondary-actions {
-  padding: 18px 32px;
+  padding: clamp(1rem, 0.9rem + 0.3vw, 1.125rem) var(--gmbox-space-xl);
 }
 
 .detail-move-controls {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 12px;
+  gap: var(--gmbox-space-md);
 }
 
 .detail-folder-select {
-  min-width: 240px;
+  min-width: clamp(12rem, 24vw, 15rem);
 }
 
 .detail-body-section,
 .detail-attachments-section {
-  padding: 28px 32px 32px;
+  padding: var(--gmbox-space-2xl) var(--gmbox-space-xl) var(--gmbox-space-xl);
 }
 
 .detail-body-wrap,
 .detail-attachments-grid {
-  max-width: 760px;
+  max-width: var(--gmbox-body-wrap);
 }
 
 .detail-body-wrap-html {
-  max-width: 820px;
+  max-width: var(--gmbox-body-wrap-wide);
   margin: 0 auto;
 }
 
@@ -635,21 +635,21 @@ onMounted(loadDetail)
 }
 
 .detail-body-toolbar {
-  max-width: 760px;
+  max-width: var(--gmbox-body-wrap);
 }
 
 .detail-attachments-grid {
   display: grid;
-  gap: 12px;
+  gap: var(--gmbox-space-md);
 }
 
 .detail-attachment-card {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 14px 16px;
-  border: 1px solid #dbe4f0;
-  border-radius: 14px;
+  padding: clamp(0.875rem, 0.8rem + 0.18vw, 1rem) var(--gmbox-space-md);
+  border: 0.0625rem solid #dbe4f0;
+  border-radius: 0.875rem;
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   text-align: left;
   cursor: pointer;
@@ -658,17 +658,17 @@ onMounted(loadDetail)
 
 .detail-attachment-card:hover {
   border-color: #93c5fd;
-  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.12);
-  transform: translateY(-1px);
+  box-shadow: 0 0.625rem 1.5rem rgba(59, 130, 246, 0.12);
+  transform: translateY(-0.0625rem);
 }
 
 .detail-attachment-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: clamp(2.375rem, 2.2rem + 0.5vw, 2.625rem);
+  height: clamp(2.375rem, 2.2rem + 0.5vw, 2.625rem);
+  border-radius: 0.75rem;
   background: #eff6ff;
   flex: none;
 }
@@ -676,12 +676,12 @@ onMounted(loadDetail)
 .detail-attachment-main {
   min-width: 0;
   flex: 1;
-  margin-left: 14px;
+  margin-left: clamp(0.75rem, 0.65rem + 0.2vw, 0.875rem);
 }
 
 .detail-attachment-name {
   color: #0f172a;
-  font-size: 14px;
+  font-size: clamp(0.8125rem, 0.78rem + 0.12vw, 0.875rem);
   font-weight: 600;
   word-break: break-word;
 }
@@ -689,33 +689,33 @@ onMounted(loadDetail)
 .detail-attachment-meta,
 .detail-attachment-size {
   color: #64748b;
-  font-size: 13px;
+  font-size: clamp(0.75rem, 0.72rem + 0.1vw, 0.8125rem);
 }
 
 .detail-attachment-meta {
-  margin-top: 2px;
+  margin-top: var(--gmbox-space-2xs);
 }
 
 .detail-attachment-size {
-  margin-left: 12px;
+  margin-left: var(--gmbox-space-md);
   white-space: nowrap;
 }
 
 .detail-body-content {
-  font-size: 16px;
+  font-size: var(--gmbox-font-body);
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 63.9375rem) {
   .detail-header,
   .detail-secondary-actions,
   .detail-body-section,
   .detail-attachments-section {
-    padding-left: 20px;
-    padding-right: 20px;
+    padding-left: var(--gmbox-space-lg);
+    padding-right: var(--gmbox-space-lg);
   }
 
   .detail-subject {
-    font-size: 26px;
+    font-size: clamp(1.5rem, 1.3rem + 0.8vw, 1.75rem);
   }
 
   .detail-header-top,
@@ -738,7 +738,7 @@ onMounted(loadDetail)
   .detail-attachment-main,
   .detail-attachment-size {
     margin-left: 0;
-    margin-top: 10px;
+    margin-top: clamp(0.5rem, 0.42rem + 0.2vw, 0.625rem);
   }
 
   .detail-toolbar {

@@ -1,6 +1,7 @@
 <template>
-  <q-page class="q-pa-md">
-    <div class="row q-col-gutter-md">
+  <q-page class="gmbox-page">
+    <div class="gmbox-page-shell">
+    <div class="row gmbox-col-gap-md">
       <q-card bordered class="col-12 col-lg-auto inbox-sidebar-card">
         <q-card-section>
           <div class="text-subtitle1 text-weight-bold">邮箱与文件夹</div>
@@ -48,7 +49,7 @@
       </q-card>
 
       <q-card bordered class="col-12 col-lg">
-        <q-card-section class="row q-col-gutter-md items-center">
+        <q-card-section class="row gmbox-col-gap-md items-center">
           <div class="col-12 col-md-8">
             <q-input v-model.trim="keywordInput" outlined dense label="搜索主题、发件人或摘要">
               <template #append>
@@ -61,21 +62,21 @@
         <q-separator />
 
         <q-card-section>
-          <q-banner v-if="error" rounded dense class="bg-red-1 text-negative q-mb-md">{{ error }}</q-banner>
+          <q-banner v-if="error" rounded dense class="gmbox-banner-error gmbox-banner-gap">{{ error }}</q-banner>
           <div v-if="messages.length > 0">
             <MessageThreadCard v-for="item in messages" :key="item.id" :message="item" show-folder @changed="loadMessages(page)" @deleted="handleMessageDeleted(item.id)" @reply="openReplyDialog" />
           </div>
-          <div v-else class="column items-center justify-center text-center q-py-xl text-grey-7">
-            <q-icon name="mail_off" size="56px" color="grey-5" />
-            <div class="text-subtitle1 q-mt-md">暂无匹配邮件</div>
+          <div v-else class="gmbox-empty-state">
+            <q-icon name="mail_off" size="var(--gmbox-empty-icon-size)" color="grey-5" />
+            <div class="text-subtitle1 gmbox-empty-title">暂无匹配邮件</div>
           </div>
         </q-card-section>
 
         <q-separator />
 
-        <q-card-section class="row items-center justify-center q-gutter-sm">
+        <q-card-section class="row items-center justify-center gmbox-inline-gap-sm">
           <q-btn outline color="primary" no-caps :disable="page <= 1" label="上一页" @click="loadMessages(page - 1)" />
-          <q-select v-model="pageSize" outlined dense emit-value map-options :options="pageSizeOptions" style="min-width: 128px" @update:model-value="handlePageSizeChange" />
+          <q-select v-model="pageSize" outlined dense emit-value map-options :options="pageSizeOptions" class="gmbox-page-size-select" @update:model-value="handlePageSizeChange" />
           <div class="text-body2 text-grey-7">第 {{ page }} / {{ totalPages }} 页</div>
           <div class="text-body2 text-grey-7">共 {{ total }} 封</div>
           <q-btn outline color="primary" no-caps :disable="page >= totalPages" label="下一页" @click="loadMessages(page + 1)" />
@@ -85,9 +86,10 @@
 
     <ComposeDialog v-model="showComposeDialog" :preset="composePreset" @sent="loadMessages(page)" />
 
-    <q-page-sticky position="bottom-right" :offset="[24, 24]">
+    <q-page-sticky position="bottom-right" :offset="stickyOffset">
       <HoverActionFab primary-icon="edit_square" primary-label="写信" secondary-icon="refresh" secondary-label="刷新列表" @primary="openComposeDialog" @secondary="refreshAll" />
     </q-page-sticky>
+    </div>
   </q-page>
 </template>
 
@@ -97,6 +99,7 @@ import { request, type MailAccount, type MailboxItem, type MessageItem, type Mes
 import ComposeDialog from '@/components/ComposeDialog.vue'
 import HoverActionFab from '@/components/HoverActionFab.vue'
 import MessageThreadCard from '@/components/MessageThreadCard.vue'
+import { useResponsiveStickyOffset } from '@/uiMetrics'
 
 const accounts = ref<MailAccount[]>([])
 const mailboxes = ref<MailboxItem[]>([])
@@ -112,6 +115,7 @@ const pageSize = ref(20)
 const total = ref(0)
 const showComposeDialog = ref(false)
 const composePreset = ref<{ title?: string; account_id?: number; to?: string; subject?: string; body?: string } | null>(null)
+const stickyOffset = useResponsiveStickyOffset()
 let keywordTimer: ReturnType<typeof setTimeout> | null = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
@@ -269,11 +273,11 @@ onMounted(refreshAll)
 
 <style scoped>
 .inbox-sidebar-card {
-  width: 300px;
+  width: var(--gmbox-sidebar-width-compact);
   max-width: 100%;
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 63.9375rem) {
   .inbox-sidebar-card {
     max-width: none;
   }

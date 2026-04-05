@@ -1,5 +1,5 @@
 <template>
-  <q-page class="q-pa-md">
+  <q-page class="gmbox-page">
     <q-form @submit.prevent="submit">
       <q-card bordered>
         <q-card-section>
@@ -7,19 +7,19 @@
         </q-card-section>
 
         <q-card-section v-if="message" class="q-pt-none">
-          <q-banner rounded :class="isError ? 'bg-red-1 text-negative' : 'bg-green-1 text-positive'">
+          <q-banner rounded :class="isError ? 'gmbox-banner-error' : 'gmbox-banner-success'">
             {{ message }}
           </q-banner>
         </q-card-section>
 
         <q-separator />
 
-        <q-card-section class="row q-col-gutter-md">
+        <q-card-section class="row gmbox-col-gap-md">
           <q-select v-model="form.account_id" class="col-12 col-lg-8" outlined emit-value map-options :options="accountOptions" label="发件邮箱" />
           <q-toggle v-model="form.is_html" class="col-12 col-lg-4" color="primary" label="HTML 正文" />
         </q-card-section>
 
-        <q-card-section class="row q-col-gutter-md q-pt-none">
+        <q-card-section class="row gmbox-col-gap-md q-pt-none">
           <q-input v-model="form.to" class="col-12" outlined label="收件人" hint="多个地址用英文逗号分隔" />
           <q-input v-model="form.cc" class="col-12 col-md-6" outlined label="抄送" />
           <q-input v-model="form.bcc" class="col-12 col-md-6" outlined label="密送" />
@@ -30,11 +30,11 @@
         </q-card-section>
 
         <q-card-section class="q-pt-none">
-          <q-input v-model="form.body" outlined autogrow type="textarea" label="正文" input-style="min-height: 320px" />
+          <q-input v-model="form.body" outlined autogrow type="textarea" label="正文" input-style="min-height: var(--gmbox-editor-height-lg)" />
         </q-card-section>
       </q-card>
 
-      <q-page-sticky position="bottom-right" :offset="[24, 24]">
+      <q-page-sticky position="bottom-right" :offset="stickyOffset">
         <q-fab color="primary" icon="send" direction="up" vertical-actions-align="right">
           <q-tooltip>发送操作</q-tooltip>
           <q-fab-action color="primary" icon="send" label="发送邮件" label-position="left" @click="submit">
@@ -49,10 +49,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { request, type MailAccount } from '@/api'
+import { useResponsiveStickyOffset } from '@/uiMetrics'
 
 const accounts = ref<MailAccount[]>([])
 const message = ref('')
 const isError = ref(false)
+const stickyOffset = useResponsiveStickyOffset()
 const form = reactive({
   account_id: 0,
   to: '',

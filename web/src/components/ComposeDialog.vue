@@ -1,10 +1,10 @@
 <template>
   <q-dialog :model-value="modelValue" persistent @update:model-value="emit('update:modelValue', $event)">
-    <q-card class="full-width" style="max-width: 920px">
-      <q-card-section class="row items-start justify-between q-col-gutter-md">
+    <q-card class="full-width gmbox-dialog-wide">
+      <q-card-section class="row items-start justify-between gmbox-col-gap-md">
         <div class="col">
           <div class="text-h6 text-weight-bold">{{ dialogTitle }}</div>
-          <div class="text-body2 text-grey-7 q-mt-xs">使用已接入邮箱直接发信，支持新写邮件、回复和转发。</div>
+          <div class="text-body2 text-grey-7 gmbox-section-hint">使用已接入邮箱直接发信，支持新写邮件、回复和转发。</div>
         </div>
         <div class="col-auto">
           <q-btn flat round dense icon="close" @click="closeDialog" />
@@ -14,15 +14,15 @@
       <q-separator />
 
       <q-card-section>
-        <q-banner v-if="message" rounded :class="isError ? 'bg-red-1 text-negative q-mb-md' : 'bg-green-1 text-positive q-mb-md'">
+        <q-banner v-if="message" rounded :class="isError ? 'gmbox-banner-error gmbox-banner-gap' : 'gmbox-banner-success gmbox-banner-gap'">
           {{ message }}
         </q-banner>
 
-        <q-banner v-if="presetNotice" rounded class="bg-blue-1 text-primary q-mb-md">
+        <q-banner v-if="presetNotice" rounded class="gmbox-banner-info gmbox-banner-gap">
           {{ presetNotice }}
         </q-banner>
 
-        <q-form class="row q-col-gutter-md" @submit.prevent="submit">
+        <q-form class="row gmbox-col-gap-md" @submit.prevent="submit">
           <q-select v-model="form.account_id" class="col-12 col-lg-6" outlined emit-value map-options :options="accountOptions" label="发件邮箱" />
           <q-toggle v-model="form.is_html" class="col-12 col-lg-6" color="primary" label="HTML 正文" />
 
@@ -32,7 +32,7 @@
           <q-input v-model="form.subject" class="col-12" outlined label="主题" />
 
           <div v-if="forwardedAttachments.length > 0" class="col-12">
-            <div class="text-subtitle2 text-weight-medium q-mb-sm">将随邮件一并转发以下附件</div>
+            <div class="text-subtitle2 text-weight-medium gmbox-banner-gap-sm">将随邮件一并转发以下附件</div>
             <q-list bordered separator>
               <q-item v-for="attachment in forwardedAttachments" :key="attachment.id">
                 <q-item-section avatar>
@@ -49,9 +49,9 @@
             </q-list>
           </div>
 
-          <q-input v-model="form.body" class="col-12" outlined autogrow type="textarea" label="正文" input-style="min-height: 260px" />
+          <q-input v-model="form.body" class="col-12" outlined autogrow type="textarea" label="正文" input-style="min-height: var(--gmbox-editor-height-md)" />
 
-          <div class="col-12 row justify-end q-gutter-sm">
+          <div class="col-12 row justify-end gmbox-inline-gap-sm">
             <q-btn flat no-caps label="取消" @click="closeDialog" />
             <q-btn color="primary" unelevated no-caps type="submit" label="发送邮件" />
           </div>

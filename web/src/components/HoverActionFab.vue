@@ -61,11 +61,11 @@ function stopLongPress() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: var(--gmbox-space-md);
 }
 
 .hover-fab-secondary {
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 0.5rem 1.5rem rgba(15, 23, 42, 0.18);
 }
 
 .fab-fade-enter-active,
@@ -76,6 +76,6 @@ function stopLongPress() {
 .fab-fade-enter-from,
 .fab-fade-leave-to {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(0.5rem);
 }
 </style>

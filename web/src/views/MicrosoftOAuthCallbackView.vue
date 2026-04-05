@@ -1,7 +1,7 @@
 <template>
   <div class="oauth-callback column items-center justify-center q-pa-xl text-center">
     <div class="text-h6 text-weight-bold">微软 OAuth 处理中</div>
-    <div class="text-body2 text-grey-7 q-mt-sm">{{ status }}</div>
+    <div class="text-body2 text-grey-7 gmbox-top-gap-sm">{{ status }}</div>
   </div>
 </template>
 

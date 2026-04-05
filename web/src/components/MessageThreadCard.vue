@@ -1,12 +1,12 @@
 <template>
   <q-card bordered flat class="message-card">
     <q-card-section class="cursor-pointer" @click="toggleExpanded">
-      <div class="row items-start q-col-gutter-md no-wrap">
+      <div class="row items-start gmbox-col-gap-md no-wrap">
         <div class="col">
           <div :class="message.is_read ? 'text-subtitle2' : 'text-subtitle2 text-weight-bold'">{{ message.subject || '(无主题)' }}</div>
-          <div v-if="!hideSender" class="text-caption text-grey-7 q-mt-xs">{{ formatSender(message) }}</div>
-          <div class="text-caption text-grey-7 q-mt-xs">{{ message.snippet || '暂无摘要' }}</div>
-          <div class="row q-gutter-sm q-mt-sm">
+          <div v-if="!hideSender" class="text-caption text-grey-7 gmbox-section-hint">{{ formatSender(message) }}</div>
+          <div class="text-caption text-grey-7 gmbox-section-hint">{{ message.snippet || '暂无摘要' }}</div>
+          <div class="row gmbox-inline-gap-sm gmbox-top-gap-sm">
             <q-badge v-if="showFolder" color="grey-3" text-color="dark">{{ message.folder }}</q-badge>
             <q-badge v-if="message.has_attachment" color="grey-3" text-color="dark">含附件</q-badge>
             <q-badge v-if="!message.is_read" color="primary" text-color="white">未读</q-badge>
@@ -14,7 +14,7 @@
         </div>
         <div class="col-auto text-caption text-grey-6 message-meta">
           <div>{{ formatDate(message.sent_at) }}</div>
-          <div class="q-mt-xs">{{ formatAccountEmail(message.account_email) }}</div>
+          <div class="gmbox-section-hint">{{ formatAccountEmail(message.account_email) }}</div>
         </div>
       </div>
     </q-card-section>
@@ -22,8 +22,8 @@
     <template v-if="expanded">
       <q-separator />
 
-      <q-card-section class="row items-center q-col-gutter-sm">
-        <div class="col row q-gutter-xs">
+        <q-card-section class="row items-center gmbox-col-gap-sm">
+        <div class="col row gmbox-inline-gap-sm">
           <q-btn flat round dense color="primary" :icon="message.is_read ? 'mark_email_unread' : 'mark_email_read'" @click="toggleRead"><q-tooltip>{{ message.is_read ? '标记为未读' : '标记为已读' }}</q-tooltip></q-btn>
           <q-btn flat round dense color="negative" icon="delete" @click="deleteMessage"><q-tooltip>删除邮件</q-tooltip></q-btn>
           <q-btn flat round dense color="secondary" :icon="showRemoteImages ? 'hide_image' : 'image'" @click="showRemoteImages = !showRemoteImages"><q-tooltip>{{ showRemoteImages ? '隐藏远程图片' : '显示远程图片' }}</q-tooltip></q-btn>
@@ -33,14 +33,14 @@
       </q-card-section>
 
       <q-card-section v-if="statusMessage" class="q-pt-none">
-        <q-banner rounded dense :class="statusError ? 'bg-red-1 text-negative' : 'bg-green-1 text-positive'">
+        <q-banner rounded dense :class="statusError ? 'gmbox-banner-error' : 'gmbox-banner-success'">
           {{ statusMessage }}
         </q-banner>
       </q-card-section>
 
       <q-card-section>
         <q-inner-loading :showing="loadingDetail">
-          <q-spinner color="primary" size="32px" />
+          <q-spinner color="primary" size="var(--gmbox-spinner-size)" />
         </q-inner-loading>
         <article v-if="sanitizedHtml" class="mail-html" v-html="sanitizedHtml"></article>
         <article v-else class="mail-text">{{ safeBody }}</article>
@@ -66,7 +66,7 @@
   </q-card>
 
   <q-dialog v-model="showMoveDialog">
-    <q-card class="full-width" style="max-width: 420px">
+    <q-card class="full-width gmbox-dialog-compact">
       <q-card-section class="text-h6">选择移动位置</q-card-section>
       <q-card-section>
         <q-select v-model="targetFolder" outlined emit-value map-options :options="mailboxOptions" label="目标文件夹" />
@@ -358,11 +358,11 @@ onMounted(() => {
 
 <style scoped>
 .message-card + .message-card {
-  margin-top: 12px;
+  margin-top: var(--gmbox-space-md);
 }
 
 .message-meta {
-  max-width: min(280px, 40vw);
+  max-width: min(17.5rem, 40vw);
   text-align: right;
   word-break: break-all;
 }

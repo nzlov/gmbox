@@ -1,9 +1,9 @@
 <template>
-  <q-page class="q-pa-md">
+  <q-page class="gmbox-page">
     <q-card bordered>
       <q-card-section v-if="(message || error) && !showModal && !showImportModal" class="q-pt-none">
-        <q-banner v-if="message" rounded class="bg-green-1 text-positive q-mb-sm">{{ message }}</q-banner>
-        <q-banner v-if="error" rounded class="bg-red-1 text-negative">{{ error }}</q-banner>
+        <q-banner v-if="message" rounded class="gmbox-banner-success gmbox-banner-gap-sm">{{ message }}</q-banner>
+        <q-banner v-if="error" rounded class="gmbox-banner-error">{{ error }}</q-banner>
       </q-card-section>
 
       <q-table
@@ -18,11 +18,11 @@
         no-data-label="暂无邮箱，请先添加。"
       >
         <template #top>
-          <div class="full-width row q-col-gutter-md items-center">
+          <div class="full-width row gmbox-col-gap-md items-center">
             <div class="col-12 col-xl-5">
               <q-input v-model.trim="searchKeyword" outlined dense clearable label="搜索名称、邮箱或服务商" />
             </div>
-            <div v-if="hasSelection" class="col-12 col-xl row q-gutter-sm wrap justify-end">
+            <div v-if="hasSelection" class="col-12 col-xl row gmbox-inline-gap-sm wrap justify-end">
               <q-btn outline color="primary" no-caps label="启用" @click="batchUpdateEnabled(true)" />
               <q-btn outline color="primary" no-caps label="禁用" @click="batchUpdateEnabled(false)" />
               <q-btn outline color="secondary" no-caps label="同步" @click="batchSync" />
@@ -50,7 +50,7 @@
 
         <template #body-cell-actions="props">
           <q-td :props="props">
-            <div class="row q-gutter-xs no-wrap">
+            <div class="row gmbox-inline-gap-sm no-wrap">
               <q-btn flat dense no-caps color="primary" label="编辑" @click="openEditModal(props.row)" />
               <q-btn flat dense no-caps color="secondary" label="测试" @click="test(props.row.id)" />
               <q-btn flat dense no-caps color="secondary" label="同步" @click="sync(props.row.id)" />
@@ -61,11 +61,11 @@
     </q-card>
 
     <q-dialog v-model="showModal" persistent @hide="closeModal">
-        <q-card class="full-width" style="max-width: 920px">
-        <q-card-section class="row items-start justify-between q-col-gutter-md">
+        <q-card class="full-width gmbox-dialog-wide">
+        <q-card-section class="row items-start justify-between gmbox-col-gap-md">
           <div class="col">
             <div class="text-h6 text-weight-bold">{{ editingID ? '修改邮箱' : '添加邮箱' }}</div>
-            <div class="text-body2 text-grey-7 q-mt-xs">选择常见服务商后自动填充 IMAP、POP3、SMTP，仍可继续修改。</div>
+            <div class="text-body2 text-grey-7 gmbox-section-hint">选择常见服务商后自动填充 IMAP、POP3、SMTP，仍可继续修改。</div>
           </div>
           <div class="col-auto">
             <q-btn flat round dense icon="close" @click="closeModal" />
@@ -75,14 +75,14 @@
         <q-separator />
 
         <q-card-section>
-          <q-banner v-if="showModal && error" rounded class="bg-red-1 text-negative q-mb-md">
+          <q-banner v-if="showModal && error" rounded class="gmbox-banner-error gmbox-banner-gap">
             {{ error }}
           </q-banner>
-          <q-banner v-if="showModal && message" rounded class="bg-green-1 text-positive q-mb-md">
+          <q-banner v-if="showModal && message" rounded class="gmbox-banner-success gmbox-banner-gap">
             {{ message }}
           </q-banner>
 
-          <q-form class="row q-col-gutter-md" @submit.prevent="submit">
+          <q-form class="row gmbox-col-gap-md" @submit.prevent="submit">
             <q-select
               v-model="form.provider"
               class="col-12"
@@ -132,9 +132,9 @@
             />
 
             <div v-else class="col-12">
-              <q-banner rounded class="bg-blue-1 text-primary">
+              <q-banner rounded class="gmbox-banner-info">
                 <div class="text-subtitle2 text-weight-medium">微软 OAuth 授权</div>
-                <div class="text-body2 q-mt-xs">完成授权后会自动接入 Outlook / Microsoft 365 邮箱，并可继续修改 IMAP、SMTP 配置。</div>
+                <div class="text-body2 gmbox-section-hint">完成授权后会自动接入 Outlook / Microsoft 365 邮箱，并可继续修改 IMAP、SMTP 配置。</div>
                 <template #action>
                   <q-btn
                     flat
@@ -173,7 +173,7 @@
             <q-input v-model="form.smtp_host" class="col-12 col-md-6" outlined dense label="SMTP Host" />
             <q-input v-model.number="form.smtp_port" class="col-12 col-md-6" outlined dense type="number" label="SMTP Port" />
             <q-toggle v-model="form.enabled" class="col-12" color="primary" label="启用账户" />
-            <div class="col-12 row justify-end q-gutter-sm">
+            <div class="col-12 row justify-end gmbox-inline-gap-sm">
               <q-btn flat no-caps label="取消" @click="closeModal" />
               <q-btn color="primary" unelevated no-caps type="submit" :label="editingID ? '保存修改' : '保存邮箱'" />
             </div>
@@ -183,11 +183,11 @@
     </q-dialog>
 
     <q-dialog v-model="showImportModal" persistent @hide="closeImportModal">
-        <q-card class="full-width" style="max-width: 920px">
-        <q-card-section class="row items-start justify-between q-col-gutter-md">
+        <q-card class="full-width gmbox-dialog-wide">
+        <q-card-section class="row items-start justify-between gmbox-col-gap-md">
           <div class="col">
             <div class="text-h6 text-weight-bold">批量导入非 OAuth 邮箱</div>
-            <div class="text-body2 text-grey-7 q-mt-xs">每行一个邮箱，支持英文逗号或制表符分隔，已知服务商可自动补齐服务器配置。</div>
+            <div class="text-body2 text-grey-7 gmbox-section-hint">每行一个邮箱，支持英文逗号或制表符分隔，已知服务商可自动补齐服务器配置。</div>
           </div>
           <div class="col-auto">
             <q-btn flat round dense icon="close" @click="closeImportModal" />
@@ -196,11 +196,11 @@
 
         <q-separator />
 
-        <q-card-section class="column q-gutter-md">
-          <q-banner v-if="showImportModal && error" rounded class="bg-red-1 text-negative">
+          <q-card-section class="column gmbox-stack-md">
+          <q-banner v-if="showImportModal && error" rounded class="gmbox-banner-error">
             {{ error }}
           </q-banner>
-          <q-banner v-if="showImportModal && message" rounded class="bg-green-1 text-positive">
+          <q-banner v-if="showImportModal && message" rounded class="gmbox-banner-success">
             {{ message }}
           </q-banner>
 
@@ -215,11 +215,11 @@
 
           <q-banner rounded class="bg-grey-1 text-grey-8">
             <div>列顺序：名称、邮箱、用户名、密码、服务商、协议、收信主机、收信端口、SMTP 主机、SMTP 端口、是否 TLS。</div>
-            <div class="q-mt-sm">服务商可填：gmail、qq、163、126、aliyun、outlook、yahoo、custom。已知服务商留空主机和端口时会自动补齐。</div>
-            <div class="q-mt-sm">示例：张三,zs@example.com,zs@example.com,authcode123,gmail,imap,,,,,true</div>
+            <div class="gmbox-top-gap-sm">服务商可填：gmail、qq、163、126、aliyun、outlook、yahoo、custom。已知服务商留空主机和端口时会自动补齐。</div>
+            <div class="gmbox-top-gap-sm">示例：张三,zs@example.com,zs@example.com,authcode123,gmail,imap,,,,,true</div>
           </q-banner>
 
-          <div class="row justify-end q-gutter-sm">
+          <div class="row justify-end gmbox-inline-gap-sm">
             <q-btn flat no-caps label="取消" @click="closeImportModal" />
             <q-btn color="primary" unelevated no-caps label="开始导入" @click="submitImport" />
           </div>
@@ -227,7 +227,7 @@
       </q-card>
     </q-dialog>
     
-    <q-page-sticky position="bottom-right" :offset="[24, 24]">
+    <q-page-sticky position="bottom-right" :offset="stickyOffset">
       <HoverActionFab primary-icon="person_add" primary-label="添加邮箱" secondary-icon="upload_file" secondary-label="批量导入" @primary="openCreateModal" @secondary="openImportModal" />
     </q-page-sticky>
   </q-page>
@@ -244,6 +244,7 @@ import {
   type MicrosoftOAuthConfigResponse,
   type ProviderPreset,
 } from '@/api'
+import { useResponsiveStickyOffset } from '@/uiMetrics'
 import { createCodeChallenge, createMicrosoftOAuthSession, saveMicrosoftOAuthSession } from '@/utils/oauth'
 
 type MicrosoftOAuthMessage = {
@@ -270,6 +271,8 @@ type AccountForm = {
   use_tls: boolean
   enabled: boolean
 }
+
+const stickyOffset = useResponsiveStickyOffset()
 
 const router = useRouter()
 const route = useRoute()

@@ -2,8 +2,8 @@
   <q-layout view="lHh Lpr lFf">
     <q-header elevated>
       <q-toolbar>
-        <q-btn flat round dense icon="menu" class="q-mr-sm" @click="drawerOpen = !drawerOpen" />
-        <q-avatar color="primary" text-color="white" icon="mail" class="q-mr-sm" />
+        <q-btn flat round dense icon="menu" class="gmbox-right-gap-sm" @click="drawerOpen = !drawerOpen" />
+        <q-avatar color="primary" text-color="white" icon="mail" class="gmbox-right-gap-sm" />
         <q-toolbar-title>
           <div class="text-weight-bold">gmbox</div>
           <div class="text-caption">统一邮箱工作台</div>
@@ -14,7 +14,7 @@
       </q-toolbar>
     </q-header>
 
-    <q-drawer v-model="drawerOpen" show-if-above bordered :width="260">
+    <q-drawer v-model="drawerOpen" show-if-above bordered :width="drawerWidth">
       <div class="column no-wrap full-height">
         <q-list padding>
           <q-item-label header>导航</q-item-label>
@@ -38,7 +38,7 @@
 
         <q-space />
 
-        <div class="q-pa-md">
+        <div class="gmbox-page">
           <q-btn color="primary" outline class="full-width" icon="logout" label="退出登录" @click="logout" />
         </div>
       </div>
@@ -49,11 +49,11 @@
     </q-page-container>
 
     <q-dialog v-model="showThemeDialog" @hide="handleThemeDialogHide">
-      <q-card class="full-width" style="max-width: 720px">
+      <q-card class="full-width gmbox-dialog-medium">
         <q-card-section class="row items-start justify-between">
           <div>
             <div class="text-h6 text-weight-bold">切换主题</div>
-            <div class="text-body2 text-grey-7 q-mt-xs">主题会保存到数据库，登录同一账号的其他设备也会同步应用。</div>
+            <div class="text-body2 text-grey-7 gmbox-section-hint">主题会保存到数据库，登录同一账号的其他设备也会同步应用。</div>
           </div>
           <q-btn flat round dense icon="close" v-close-popup />
         </q-card-section>
@@ -61,7 +61,7 @@
         <q-separator />
 
         <q-card-section>
-          <div class="row q-col-gutter-md">
+          <div class="row gmbox-col-gap-md">
             <div v-for="preset in presets" :key="preset.name" class="col-12 col-md-6">
               <q-card bordered flat class="theme-option cursor-pointer" :class="isPresetActive(preset) ? 'theme-option-active' : ''" @click="applyPreset(preset.name)">
                 <q-card-section>
@@ -69,7 +69,7 @@
                     <div class="text-subtitle1 text-weight-medium">{{ preset.label }}</div>
                     <q-badge :color="preset.theme_mode === 'dark' ? 'dark' : 'grey-4'" :text-color="preset.theme_mode === 'dark' ? 'white' : 'dark'">{{ preset.theme_mode === 'dark' ? '深色' : '浅色' }}</q-badge>
                   </div>
-                  <div class="row q-gutter-sm q-mt-md">
+                  <div class="row gmbox-inline-gap-sm gmbox-top-gap-md">
                     <div class="theme-swatch" :style="{ background: preset.primary_color }"></div>
                     <div class="theme-swatch" :style="{ background: preset.secondary_color }"></div>
                     <div class="theme-swatch" :style="{ background: preset.accent_color }"></div>
@@ -79,7 +79,7 @@
             </div>
           </div>
 
-          <div class="row q-col-gutter-md q-mt-md">
+          <div class="row gmbox-col-gap-md gmbox-top-gap-md">
             <div class="col-12 col-md-4">
               <q-select v-model="draftTheme.theme_mode" outlined emit-value map-options :options="themeModeOptions" label="主题模式" />
             </div>
@@ -134,6 +134,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useQuasar } from 'quasar'
 import { request, type ThemePreference } from '@/api'
 import { applyThemePreference, defaultThemePreference, themePresets, themeState, type ThemePreset } from '@/theme'
+import { useResponsiveDrawerWidth } from '@/uiMetrics'
 
 type NavKey = 'aggregated' | 'contacts' | 'inbox' | 'accounts' | 'sync-logs'
 
@@ -147,6 +148,7 @@ const committedTheme = reactive<ThemePreference>({ ...themeState })
 const themeSaveCommitted = ref(false)
 const themeDraftDirty = ref(false)
 const syncingThemeDraft = ref(false)
+const drawerWidth = useResponsiveDrawerWidth()
 const presets = themePresets
 const themeModeOptions = [
   { label: '浅色', value: 'light' },
@@ -289,13 +291,13 @@ void loadTheme()
 
 .theme-option-active {
   border-color: var(--gmbox-primary, #2563eb);
-  box-shadow: inset 0 0 0 2px var(--gmbox-primary, #2563eb);
-  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 0.125rem var(--gmbox-primary, #2563eb);
+  transform: translateY(-0.0625rem);
 }
 
 .theme-swatch {
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
+  width: var(--gmbox-swatch-size);
+  height: var(--gmbox-swatch-size);
+  border-radius: 50%;
 }
 </style>
