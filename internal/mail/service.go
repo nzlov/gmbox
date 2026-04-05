@@ -314,7 +314,26 @@ func (s *Service) fetchIMAPMessageBody(ctx context.Context, account model.MailAc
 	if err != nil {
 		return nil, err
 	}
-	defer client.Logout().Wait()
+	defer closeIMAPClient(client)
+	fetched, err := s.fetchIMAPMessageBodyWithClient(client, message)
+	if err != nil && shouldRetryIMAPMailboxSelect(account, err) {
+		closeIMAPClient(client)
+		client = nil
+		client, err = s.dialIMAP(account, password)
+		if err != nil {
+			return nil, fmt.Errorf("邮件详情首次选择文件夹失败后重连 IMAP 失败: %w", err)
+		}
+		defer closeIMAPClient(client)
+		fetched, err = s.fetchIMAPMessageBodyWithClient(client, message)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return fetched, nil
+}
+
+// fetchIMAPMessageBodyWithClient 复用已建立的 IMAP 连接抓取正文，便于在瞬时断链后重连重试。
+func (s *Service) fetchIMAPMessageBodyWithClient(client *imapclient.Client, message model.Message) (*parsedMessage, error) {
 	if _, err := client.Select(message.Folder, nil).Wait(); err != nil {
 		return nil, fmt.Errorf("选择文件夹 %s 失败: %w", message.Folder, err)
 	}
@@ -399,12 +418,28 @@ func (s *Service) fetchPOP3MessageBody(ctx context.Context, account model.MailAc
 // ListMailboxes 返回指定账户下已同步的文件夹，便于前端渲染目录树。
 func (s *Service) ListMailboxes(accountID uint) ([]model.Mailbox, error) {
 	var mailboxes []model.Mailbox
-	query := s.db.Order("name asc")
+	query := s.db.Order("path asc, name asc")
 	if accountID > 0 {
 		query = query.Where("account_id = ?", accountID)
 	}
 	if err := query.Find(&mailboxes).Error; err != nil {
 		return nil, err
+	}
+	if accountID == 0 {
+		seen := make(map[string]struct{}, len(mailboxes))
+		deduped := make([]model.Mailbox, 0, len(mailboxes))
+		for _, mailbox := range mailboxes {
+			path := strings.TrimSpace(mailbox.Path)
+			if path == "" {
+				continue
+			}
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			deduped = append(deduped, mailbox)
+		}
+		mailboxes = deduped
 	}
 	return mailboxes, nil
 }
@@ -441,7 +476,7 @@ func (s *Service) SetMessageRead(ctx context.Context, messageID uint, isRead boo
 		if err != nil {
 			return err
 		}
-		defer client.Logout().Wait()
+		defer closeIMAPClient(client)
 		if _, err := client.Select(message.Folder, nil).Wait(); err != nil {
 			return err
 		}
@@ -480,7 +515,7 @@ func (s *Service) DeleteMessage(ctx context.Context, messageID uint) error {
 	if err != nil {
 		return err
 	}
-	defer client.Logout().Wait()
+	defer closeIMAPClient(client)
 	if _, err := client.Select(message.Folder, nil).Wait(); err != nil {
 		return err
 	}
@@ -516,7 +551,7 @@ func (s *Service) MoveMessage(ctx context.Context, messageID uint, targetFolder 
 	if err != nil {
 		return err
 	}
-	defer client.Logout().Wait()
+	defer closeIMAPClient(client)
 	if _, err := client.Select(message.Folder, nil).Wait(); err != nil {
 		return err
 	}

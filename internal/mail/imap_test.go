@@ -160,6 +160,38 @@ func TestFallbackIMAPMailboxesRejectsNonOutlook(t *testing.T) {
 	}
 }
 
+// TestListMailboxesDeduplicatesAggregatedPaths 确保多邮箱聚合视图按路径去重，避免系统文件夹在侧边栏重复展示。
+func TestListMailboxesDeduplicatesAggregatedPaths(t *testing.T) {
+	service := newTestMailService(t)
+	seed := []model.Mailbox{
+		{AccountID: 1, Name: "INBOX", Path: "INBOX", Role: "inbox"},
+		{AccountID: 2, Name: "INBOX", Path: "INBOX", Role: "inbox"},
+		{AccountID: 1, Name: "Sent Items", Path: "Sent Items", Role: "sent"},
+		{AccountID: 2, Name: "Archive", Path: "Archive", Role: "archive"},
+	}
+	for _, mailbox := range seed {
+		if err := service.db.Create(&mailbox).Error; err != nil {
+			t.Fatalf("写入文件夹失败: %v", err)
+		}
+	}
+	mailboxes, err := service.ListMailboxes(0)
+	if err != nil {
+		t.Fatalf("读取聚合文件夹失败: %v", err)
+	}
+	if len(mailboxes) != 3 {
+		t.Fatalf("len(mailboxes) = %d, want 3", len(mailboxes))
+	}
+	if mailboxes[0].Path != "Archive" {
+		t.Fatalf("mailboxes[0].Path = %q, want %q", mailboxes[0].Path, "Archive")
+	}
+	if mailboxes[1].Path != "INBOX" {
+		t.Fatalf("mailboxes[1].Path = %q, want %q", mailboxes[1].Path, "INBOX")
+	}
+	if mailboxes[2].Path != "Sent Items" {
+		t.Fatalf("mailboxes[2].Path = %q, want %q", mailboxes[2].Path, "Sent Items")
+	}
+}
+
 // TestIMAPOAuthMechanismOrderForOutlook 确保微软 IMAP 优先走更稳定的 XOAUTH2，减少 OAUTHBEARER 挑战把连接读坏的概率。
 func TestIMAPOAuthMechanismOrderForOutlook(t *testing.T) {
 	order := imapOAuthMechanismOrder(model.MailAccount{Provider: "outlook"})
@@ -202,11 +234,15 @@ func TestSelectIMAPOAuthMechanismsPrefersDeclaredXOAUTH2(t *testing.T) {
 	}
 }
 
-// TestShouldRetryIMAPMailboxSelectForOutlookOAuth 确保仅对微软 OAuth 的邮箱会话未连接错误触发一次重连重试。
+// TestShouldRetryIMAPMailboxSelectForOutlookOAuth 确保仅对微软 OAuth 的瞬时选箱错误触发一次重连重试。
 func TestShouldRetryIMAPMailboxSelectForOutlookOAuth(t *testing.T) {
 	err := errors.New("选择文件夹 INBOX 失败: imap: BAD User is authenticated but not connected.")
 	if !shouldRetryIMAPMailboxSelect(model.MailAccount{Provider: "outlook", AuthType: "oauth"}, err) {
 		t.Fatalf("expected retry for outlook oauth mailbox select error")
+	}
+	eofErr := errors.New("选择文件夹 INBOX 失败: unexpected EOF")
+	if !shouldRetryIMAPMailboxSelect(model.MailAccount{Provider: "outlook", AuthType: "oauth"}, eofErr) {
+		t.Fatalf("expected retry for outlook oauth unexpected eof")
 	}
 	if shouldRetryIMAPMailboxSelect(model.MailAccount{Provider: "gmail", AuthType: "oauth"}, err) {
 		t.Fatalf("did not expect retry for non-outlook provider")

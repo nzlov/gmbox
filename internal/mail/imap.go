@@ -177,7 +177,7 @@ func (s *Service) syncIMAPMailbox(client *imapclient.Client, account model.MailA
 	return total, maxUID, nil
 }
 
-// shouldRetryIMAPMailboxSelect 仅为微软 OAuth 的已认证未连邮箱会话做一次重连重试，避免瞬时会话异常直接打断整轮同步。
+// shouldRetryIMAPMailboxSelect 仅为微软 OAuth 的瞬时选箱失败做一次重连重试，避免短暂断链直接打断同步或详情加载。
 func shouldRetryIMAPMailboxSelect(account model.MailAccount, err error) bool {
 	if err == nil {
 		return false
@@ -186,7 +186,15 @@ func shouldRetryIMAPMailboxSelect(account model.MailAccount, err error) bool {
 		return false
 	}
 	message := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(message, "authenticated but not connected")
+	return strings.Contains(message, "authenticated but not connected") || strings.Contains(message, "unexpected eof")
+}
+
+// closeIMAPClient 统一在函数返回时关闭连接，避免 defer 提前求值导致还未使用就先发出 LOGOUT。
+func closeIMAPClient(client *imapclient.Client) {
+	if client == nil {
+		return
+	}
+	_ = client.Logout().Wait()
 }
 
 // dialIMAP 按账户配置建立 IMAP 连接并完成认证。
