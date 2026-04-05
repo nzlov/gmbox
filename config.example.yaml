@@ -19,7 +19,6 @@ db:
 
 log:
   level: info
-  debug: false
 
 mail:
   sync_cron: "*/1 * * * *"

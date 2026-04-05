@@ -42,6 +42,16 @@ make run
 
 默认管理员：读取 `config.yaml` 中的 `auth.init_username` 和 `auth.init_password`，仅首次启动导入。
 
+## 日志配置
+
+日志统一使用 Go 官方 `slog`。
+
+- `log.level=info`：默认日志等级
+- `log.level=debug`：开启调试日志，同时输出 IMAP、SMTP、微软 OAuth 等服务商交互日志
+- `log.level=warn|error`：收敛为更高等级日志
+
+环境变量可使用 `LOG_LEVEL` 覆盖，例如：`LOG_LEVEL=debug`。
+
 ## 微软 OAuth 配置
 
 如需启用 Outlook / Microsoft 365 OAuth，请在 `config.yaml` 或环境变量中提供：
