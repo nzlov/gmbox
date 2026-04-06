@@ -1,58 +1,91 @@
 # gmbox
 
-单管理员邮件客户端，使用 `Go + Gin + Vue3`，默认支持 `sqlite`，并兼容 `postgres`、`mysql`。
+`gmbox` 是一个单管理员邮件客户端，使用 `Go + Gin + Vue 3 + Quasar` 构建，默认支持 `sqlite`，同时兼容 `postgres` 和 `mysql`。
 
-## 当前已实现
+项目提供邮件账户管理、收信同步、邮件详情、附件下载、发信与微软 OAuth 接入能力，并将前端构建产物通过 `Go embed` 打包进服务端二进制，便于单文件部署。
 
-- `config.yaml` + 默认值回落 + 环境变量强覆盖
-- 首次启动导入默认管理员到数据库
-- `JWT + HttpOnly Cookie` 登录
-- 邮箱账户 CRUD
-- 常见邮箱服务商自动配置与自定义服务商
+## Features
+
+- 单管理员登录与会话管理，使用 `JWT + HttpOnly Cookie`
+- 邮箱账户 CRUD，支持常见服务商自动配置和自定义配置
 - 微软 OAuth 邮箱接入
-- 非 OAuth 邮箱批量导入
-- 邮箱密码 `AES-GCM` 加密存储
-- `cron/v3` 定时同步
-- `IMAP` 多文件夹增量收件
-- `POP3 UIDL` 去重收件
-- `SMTP` 发信接口
+- `IMAP` 增量收件、`POP3 UIDL` 去重收件
+- `SMTP` 发信
+- 邮件详情展示、已读未读、删除、移动等基础操作
 - 附件解析、落盘与下载
-- 邮件详情页、正文展示、已读未读/删除/移动操作
-- Gmail 风格前端基础页面
-- Gmail 风格写信页
-- Go `embed` 嵌入前端构建产物
+- 定时同步任务
+- 前端静态资源内嵌到 Go 服务端，适合简化部署
 - Docker 多阶段构建
 
-## 本地启动
+## Tech Stack
+
+- Backend: `Go`, `Gin`, `GORM`
+- Frontend: `Vue 3`, `TypeScript`, `Vite`, `Quasar`
+- Database: `sqlite` / `postgres` / `mysql`
+
+## Quick Start
+
+### 1. 安装依赖
 
 ```bash
 make deps
+```
+
+### 2. 准备配置
+
+复制示例配置并按需修改：
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+默认监听地址是 `http://127.0.0.1:8080`。
+
+### 3. 构建并运行
+
+```bash
 make build
 make run
 ```
 
-如果只想执行单独步骤：
+首次启动时，程序会根据 `auth.init_username` 初始化管理员账号，并将随机密码输出到启动日志中。
 
+## Build Commands
+
+- `make deps`：安装前端依赖
 - `make web-build`：构建前端静态资源
 - `make server-build`：构建服务端二进制 `./gmbox`
-- `make test`：运行 Go 测试
+- `make build`：先构建前端，再构建服务端
+- `make run`：本地启动服务
+- `make test`：运行全部 Go 测试
 - `make clean`：清理本地产物
 
-默认地址：`http://127.0.0.1:8080`
+更多本地开发与构建细节见 `docs/development-build.md`。
 
-默认管理员：首次启动时读取 `auth.init_username` 创建账号，密码由程序随机生成并写入启动日志，仅首次导入。
+## Configuration
 
-## 日志配置
+核心配置位于 `config.yaml`，可参考 `config.example.yaml`。
 
-日志统一使用 Go 官方 `slog`。
+常用配置项：
 
-- `log.level=info`：默认日志等级
-- `log.level=debug`：开启调试日志，同时输出 IMAP、SMTP、微软 OAuth 等服务商交互日志
-- `log.level=warn|error`：收敛为更高等级日志
+- `app.addr`：服务监听地址
+- `app.secret_key`：会话和签名相关密钥
+- `auth.init_username`：首次启动时初始化的管理员用户名
+- `db.driver` / `db.dsn`：数据库类型与连接配置
+- `mail.sync_cron`：定时同步表达式
+- `log.level`：日志等级
 
-环境变量可使用 `LOG_LEVEL` 覆盖，例如：`LOG_LEVEL=debug`。
+### 日志等级
 
-## 微软 OAuth 配置
+项目使用 Go 官方 `slog`。
+
+- `log.level=info`：默认等级
+- `log.level=debug`：输出更详细的调试日志，包括 IMAP、SMTP、微软 OAuth 等交互日志
+- `log.level=warn|error`：只输出更高等级日志
+
+也可以通过环境变量 `LOG_LEVEL` 覆盖。
+
+### 微软 OAuth
 
 如需启用 Outlook / Microsoft 365 OAuth，请在 `config.yaml` 或环境变量中提供：
 
@@ -61,25 +94,32 @@ make run
 - `microsoft_oauth.client_secret` / `MICROSOFT_OAUTH_CLIENT_SECRET`
 - `microsoft_oauth.redirect_url` / `MICROSOFT_OAUTH_REDIRECT_URL`
 
-`redirect_url` 现在支持两种模式：
+`redirect_url` 支持两种模式：
 
-- 显式配置：如果配置了 `microsoft_oauth.redirect_url`，系统始终使用该值
-- 自动推导：如果未配置 `microsoft_oauth.redirect_url`，系统会按当前访问地址自动生成 `当前站点地址/oauth/microsoft/callback`
+- 显式配置固定回调地址
+- 留空时按当前访问地址自动推导为 `当前站点地址/oauth/microsoft/callback`
 
-兼容说明：
+如果通过反向代理部署，请确保代理正确透传 `X-Forwarded-Proto` 和 `X-Forwarded-Host`。
 
-- 如果显式配置成 `/oauth/microsoft/callback`，前端会走 PKCE 流程
-- 如果显式配置成 `/api/accounts/oauth/microsoft/callback`，系统会自动切回旧服务端回调兼容流，避免已有配置升级后立即失效
+## Project Structure
 
-示例：
+```text
+.
+|-- cmd/server           服务端入口
+|-- internal/            后端业务代码
+|-- web/src              前端源码
+|-- frontend/dist        前端构建产物
+|-- docs/                补充文档
+|-- config.example.yaml  示例配置
+`-- Makefile             常用构建命令
+```
 
-- 当前通过 `http://127.0.0.1:8080` 访问时，自动回调地址为 `http://127.0.0.1:8080/oauth/microsoft/callback`
-- 当前通过 `https://mail.example.com` 访问时，自动回调地址为 `https://mail.example.com/oauth/microsoft/callback`
+## Development Docs
 
-推荐做法：
+- `docs/development-build.md`：本地开发、构建顺序、测试与发布前检查
+- `docs/v1.0.0.md`：版本说明
+- `docs/v1.1.0.md`：版本说明
 
-- 单域名直连部署时，可以不配 `redirect_url`，直接使用自动推导
-- 反向代理或公网域名部署时，确保代理正确透传 `X-Forwarded-Proto` 和 `X-Forwarded-Host`
-- 如果存在多个访问域名，或微软应用只登记了固定回调地址，建议显式配置 `redirect_url`
+## License
 
-Azure 应用注册里需要把实际使用的回调地址加入 Redirect URI 白名单。若你依赖自动推导，请把用户真实访问的域名对应的 `/oauth/microsoft/callback` 登记进去。
+本项目基于 `MIT` License 发布，详见仓库根目录的 `LICENSE` 文件。
