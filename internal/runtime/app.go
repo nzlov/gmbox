@@ -98,6 +98,7 @@ func migrate(db *gorm.DB) error {
 		&model.MessageBody{},
 		&model.Attachment{},
 		&model.ContactAggregation{},
+		&model.ContactBlacklist{},
 		&model.SyncState{},
 		&model.SyncLog{},
 	); err != nil {

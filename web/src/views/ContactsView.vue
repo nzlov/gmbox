@@ -61,6 +61,16 @@
                 </q-chip>
               </div>
             </div>
+            <div v-if="selectedContact" class="col-auto">
+              <q-btn
+                :color="selectedContact.is_blocked ? 'secondary' : 'negative'"
+                no-caps
+                unelevated
+                :icon="selectedContact.is_blocked ? 'check_circle' : 'block'"
+                :label="selectedContact.is_blocked ? '移出黑名单' : '加入黑名单'"
+                @click="toggleBlacklist"
+              />
+            </div>
           </q-card-section>
 
           <q-separator />
@@ -448,6 +458,33 @@ async function disbandAggregate() {
   }
 }
 
+async function toggleBlacklist() {
+  if (!selectedContact.value) {
+    return
+  }
+  const addresses = selectedContact.value.members.length > 0
+    ? selectedContact.value.members.map((member) => member.address)
+    : [selectedContact.value.address]
+  try {
+    if (selectedContact.value.is_blocked) {
+      await request<{ message: string }>('/api/contacts/blacklist', {
+        method: 'DELETE',
+        body: JSON.stringify({ addresses }),
+      })
+      $q.notify({ type: 'positive', message: '联系人已移出黑名单' })
+    } else {
+      await request<{ message: string }>('/api/contacts/blacklist', {
+        method: 'POST',
+        body: JSON.stringify({ addresses }),
+      })
+      $q.notify({ type: 'positive', message: '联系人已加入黑名单，后续来信将不再同步' })
+    }
+    await refreshAll()
+  } catch (err) {
+    $q.notify({ type: 'negative', message: err instanceof Error ? err.message : '更新黑名单失败' })
+  }
+}
+
 watch(contactKeyword, () => {
   if (keywordTimer) {
     clearTimeout(keywordTimer)
@@ -480,12 +517,14 @@ onBeforeUnmount(() => {
 <style scoped>
 .contacts-layout {
   align-items: stretch;
+  min-height: calc(100vh - 10rem);
 }
 
 .contacts-panel-card {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 10rem);
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -497,6 +536,7 @@ onBeforeUnmount(() => {
 .contacts-sidebar-scroll,
 .contacts-message-scroll {
   flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 

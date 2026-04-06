@@ -30,8 +30,8 @@ func newTestMailService(t *testing.T) *Service {
 // TestUpsertMessagePreservesFetchedBody 避免关闭抓取正文后把已缓存的完整正文降级回摘要。
 func TestUpsertMessagePreservesFetchedBody(t *testing.T) {
 	service := newTestMailService(t)
-	account := model.MailAccount{Model: model.MailAccount{}.Model}
-	account.ID = 1
+	account := model.MailAccount{}
+	account.Model.ID = 1
 	parsed := &parsedMessage{
 		MessageID:     "msg-1",
 		Subject:       "测试主题",
@@ -42,17 +42,17 @@ func TestUpsertMessagePreservesFetchedBody(t *testing.T) {
 		SentAt:        time.Now(),
 		HasAttachment: false,
 	}
-	if err := service.upsertMessage(account, "INBOX", 101, "", parsed, true); err != nil {
+	if _, err := service.upsertMessage(account, "INBOX", 101, "", parsed, true, nil); err != nil {
 		t.Fatalf("首次写入邮件失败: %v", err)
 	}
-	if err := service.upsertMessage(account, "INBOX", 101, "", &parsedMessage{
+	if _, err := service.upsertMessage(account, "INBOX", 101, "", &parsedMessage{
 		MessageID:   "msg-1",
 		Subject:     "测试主题",
 		FromAddress: "sender@example.com",
 		Snippet:     "被覆盖摘要",
 		TextBody:    "不应覆盖的正文",
 		SentAt:      parsed.SentAt,
-	}, false); err != nil {
+	}, false, nil); err != nil {
 		t.Fatalf("关闭正文抓取后的更新失败: %v", err)
 	}
 	var body model.MessageBody
@@ -73,9 +73,9 @@ func TestUpsertMessagePreservesFetchedBody(t *testing.T) {
 // TestUpsertMessageStoresSnippetWhenBodyDisabled 确认未启用正文抓取时只缓存摘要，并标记为未抓全量正文。
 func TestUpsertMessageStoresSnippetWhenBodyDisabled(t *testing.T) {
 	service := newTestMailService(t)
-	account := model.MailAccount{Model: model.MailAccount{}.Model}
-	account.ID = 2
-	if err := service.upsertMessage(account, "INBOX", 202, "", &parsedMessage{
+	account := model.MailAccount{}
+	account.Model.ID = 2
+	if _, err := service.upsertMessage(account, "INBOX", 202, "", &parsedMessage{
 		MessageID:   "msg-2",
 		Subject:     "摘要邮件",
 		FromAddress: "sender@example.com",
@@ -83,7 +83,7 @@ func TestUpsertMessageStoresSnippetWhenBodyDisabled(t *testing.T) {
 		TextBody:    "完整正文",
 		HTMLBody:    "<p>完整正文</p>",
 		SentAt:      time.Now(),
-	}, false); err != nil {
+	}, false, nil); err != nil {
 		t.Fatalf("写入摘要邮件失败: %v", err)
 	}
 	var body model.MessageBody

@@ -105,6 +105,12 @@ type ContactAggregation struct {
 	PrimaryAddress string `gorm:"size:255;index;not null" json:"primary_address"`
 }
 
+// ContactBlacklist 保存被管理员拉黑的联系人地址，后续同步时会直接跳过这些发件人。
+type ContactBlacklist struct {
+	utilsdb.Model
+	Address string `gorm:"size:255;uniqueIndex;not null" json:"address"`
+}
+
 // SyncState 保存邮箱同步状态和最近错误。
 type SyncState struct {
 	utilsdb.Model

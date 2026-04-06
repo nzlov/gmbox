@@ -19,6 +19,10 @@ import (
 
 // SyncIMAP 拉取全部可见文件夹中的新邮件并写入本地数据库。
 func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state *model.SyncState, fetchBody bool) (*SyncResult, error) {
+	blockedContacts, err := s.loadBlockedContactSet()
+	if err != nil {
+		return nil, err
+	}
 	password, err := s.ResolveAuthSecret(ctx, &account)
 	if err != nil {
 		return nil, err
@@ -52,14 +56,14 @@ func (s *Service) SyncIMAP(ctx context.Context, account model.MailAccount, state
 	}
 	totalNew := 0
 	for _, mailbox := range mailboxes {
-		count, maxUID, syncErr := s.syncIMAPMailbox(client, account, mailbox.Path, cursors[mailbox.Path], fetchBody)
+		count, maxUID, syncErr := s.syncIMAPMailbox(client, account, mailbox.Path, cursors[mailbox.Path], fetchBody, blockedContacts)
 		if syncErr != nil && shouldRetryIMAPMailboxSelect(account, syncErr) {
 			_ = client.Logout().Wait()
 			client, err = s.dialIMAP(account, password)
 			if err != nil {
 				return nil, fmt.Errorf("文件夹 %s 首次选择失败后重连 IMAP 失败: %w", mailbox.Path, err)
 			}
-			count, maxUID, syncErr = s.syncIMAPMailbox(client, account, mailbox.Path, cursors[mailbox.Path], fetchBody)
+			count, maxUID, syncErr = s.syncIMAPMailbox(client, account, mailbox.Path, cursors[mailbox.Path], fetchBody, blockedContacts)
 		}
 		if syncErr != nil {
 			return nil, syncErr
@@ -100,7 +104,7 @@ func (s *Service) fallbackIMAPMailboxes(account model.MailAccount, listErr error
 }
 
 // syncIMAPMailbox 同步单个文件夹，并返回新增数量和最新 UID。
-func (s *Service) syncIMAPMailbox(client *imapclient.Client, account model.MailAccount, folder string, lastUID uint32, fetchBody bool) (int, uint32, error) {
+func (s *Service) syncIMAPMailbox(client *imapclient.Client, account model.MailAccount, folder string, lastUID uint32, fetchBody bool, blockedContacts map[string]struct{}) (int, uint32, error) {
 	mbox, err := client.Select(folder, nil).Wait()
 	if err != nil {
 		return 0, lastUID, fmt.Errorf("选择文件夹 %s 失败: %w", folder, err)
@@ -163,10 +167,13 @@ func (s *Service) syncIMAPMailbox(client *imapclient.Client, account model.MailA
 		if parsed.SentAt.IsZero() {
 			parsed.SentAt = buffer.InternalDate
 		}
-		if err := s.upsertMessage(account, folder, uint32(buffer.UID), "", parsed, fetchBody); err != nil {
+		stored, err := s.upsertMessage(account, folder, uint32(buffer.UID), "", parsed, fetchBody, blockedContacts)
+		if err != nil {
 			return 0, lastUID, err
 		}
-		total++
+		if stored {
+			total++
+		}
 		if uint32(buffer.UID) > maxUID {
 			maxUID = uint32(buffer.UID)
 		}
@@ -402,11 +409,11 @@ func outlookIMAPAuthErrorCode(line string) string {
 	return strings.TrimSpace(line[start : start+end])
 }
 
-// upsertMessage 根据账户和协议唯一标识保存邮件，避免重复落库。
-func (s *Service) upsertMessage(account model.MailAccount, folder string, uid uint32, pop3UIDL string, parsed *parsedMessage, fetchBody bool) error {
+// upsertMessage 根据账户和协议唯一标识保存邮件，命中黑名单时仅写入隐藏占位避免后续重复抓取。
+func (s *Service) upsertMessage(account model.MailAccount, folder string, uid uint32, pop3UIDL string, parsed *parsedMessage, fetchBody bool, blockedContacts map[string]struct{}) (bool, error) {
 	mailboxID, err := s.ensureMailbox(account.Model.ID, folder)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var message model.Message
 	query := s.db.Where("account_id = ?", account.Model.ID)
@@ -417,26 +424,32 @@ func (s *Service) upsertMessage(account model.MailAccount, folder string, uid ui
 	}
 	err = query.First(&message).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
-		return err
+		return false, err
 	}
 	parsed.applyToMessage(&message, account.Model.ID, folder)
 	message.MailboxID = mailboxID
 	message.UID = uid
 	message.POP3UIDL = pop3UIDL
+	if isBlockedContact(parsed.FromAddress, blockedContacts) {
+		message.IsDeleted = true
+		message.Snippet = ""
+		message.HasAttachment = false
+		if err := s.saveMessageRecord(&message, err == gorm.ErrRecordNotFound); err != nil {
+			return false, err
+		}
+		return false, s.clearMessageContent(message.Model.ID)
+	}
 	if err == gorm.ErrRecordNotFound {
-		if err := s.db.Create(&message).Error; err != nil {
-			return err
-		}
-	} else {
-		if err := s.db.Save(&message).Error; err != nil {
-			return err
-		}
+		message.IsDeleted = false
+	}
+	if err := s.saveMessageRecord(&message, err == gorm.ErrRecordNotFound); err != nil {
+		return false, err
 	}
 
 	var body model.MessageBody
 	bodyErr := s.db.Where("message_id = ?", message.Model.ID).First(&body).Error
 	if bodyErr != nil && bodyErr != gorm.ErrRecordNotFound {
-		return bodyErr
+		return false, bodyErr
 	}
 	body.MessageID = message.Model.ID
 	if fetchBody {
@@ -450,14 +463,33 @@ func (s *Service) upsertMessage(account model.MailAccount, folder string, uid ui
 	}
 	if bodyErr == gorm.ErrRecordNotFound {
 		if err := s.db.Create(&body).Error; err != nil {
-			return err
+			return false, err
 		}
 	} else {
 		if err := s.db.Save(&body).Error; err != nil {
-			return err
+			return false, err
 		}
 	}
-	return s.replaceAttachments(message.Model.ID, parsed.Attachments)
+	if err := s.replaceAttachments(message.Model.ID, parsed.Attachments); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// saveMessageRecord 统一处理邮件记录的新建和更新，避免黑名单占位与正常邮件各自维护一套保存逻辑。
+func (s *Service) saveMessageRecord(message *model.Message, create bool) error {
+	if create {
+		return s.db.Create(message).Error
+	}
+	return s.db.Save(message).Error
+}
+
+// clearMessageContent 清理隐藏占位邮件的正文和附件，避免黑名单邮件意外残留可见内容。
+func (s *Service) clearMessageContent(messageID uint) error {
+	if err := s.db.Where("message_id = ?", messageID).Delete(&model.MessageBody{}).Error; err != nil {
+		return err
+	}
+	return s.replaceAttachments(messageID, nil)
 }
 
 // syncMailboxes 将远端文件夹同步到本地表，便于前端直接展示目录树。

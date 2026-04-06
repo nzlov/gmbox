@@ -128,6 +128,7 @@ export interface ContactItem {
   total: number
   member_count: number
   members: ContactMember[]
+  is_blocked: boolean
 }
 
 export interface ContactListResponse {

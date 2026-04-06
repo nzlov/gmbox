@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/url"
 	"reflect"
 	"testing"
@@ -92,6 +93,49 @@ func TestGroupContactsKeepMappedOnlyMember(t *testing.T) {
 	}
 }
 
+// TestApplyContactBlockedState 确保仅在整组成员都被拉黑时才把联系人组标记为黑名单状态。
+func TestApplyContactBlockedState(t *testing.T) {
+	groups := []contactItem{
+		{Address: "boss@example.com", Members: []contactMember{{Address: "boss@example.com"}, {Address: "ceo@example.com"}}},
+		{Address: "solo@example.com", Members: []contactMember{{Address: "solo@example.com"}}},
+	}
+	applyContactBlockedState(groups, map[string]struct{}{
+		"boss@example.com": {},
+		"ceo@example.com":  {},
+	})
+	if !groups[0].IsBlocked {
+		t.Fatal("groups[0].is_blocked = false, want true")
+	}
+	if groups[1].IsBlocked {
+		t.Fatal("groups[1].is_blocked = true, want false")
+	}
+}
+
+// TestLoadContactGroupsKeepsBlacklistOnlyContact 确保仅存在于黑名单中的联系人仍会显示在列表里，便于后续解除拉黑。
+func TestLoadContactGroupsKeepsBlacklistOnlyContact(t *testing.T) {
+	db := openContactTestDB(t)
+	if err := db.Create(&model.ContactBlacklist{Address: "blocked@example.com"}).Error; err != nil {
+		t.Fatalf("写入黑名单失败: %v", err)
+	}
+
+	groups, err := loadContactGroups(db, "")
+	if err != nil {
+		t.Fatalf("loadContactGroups() error = %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("len(groups) = %d, want 1", len(groups))
+	}
+	if groups[0].Address != "blocked@example.com" {
+		t.Fatalf("groups[0].address = %q, want blocked@example.com", groups[0].Address)
+	}
+	if !groups[0].IsBlocked {
+		t.Fatal("groups[0].is_blocked = false, want true")
+	}
+	if groups[0].MemberCount != 1 {
+		t.Fatalf("groups[0].member_count = %d, want 1", groups[0].MemberCount)
+	}
+}
+
 // TestExpandContactGroupMembers 确保从任意成员进入时都能展开同一聚合组全部地址。
 func TestExpandContactGroupMembers(t *testing.T) {
 	got := expandContactGroupMembers(
@@ -166,13 +210,37 @@ func TestUpdateContactAggregationKeepsOriginalOnValidationError(t *testing.T) {
 	}
 }
 
+// TestBlockContactsExpandsAggregation 确保拉黑主联系人时会把整组成员一起加入黑名单，避免聚合联系人漏拦截。
+func TestBlockContactsExpandsAggregation(t *testing.T) {
+	db := openContactTestDB(t)
+	seed := []model.ContactAggregation{{Address: "ceo@example.com", PrimaryAddress: "boss@example.com"}}
+	if err := db.Create(&seed).Error; err != nil {
+		t.Fatalf("写入测试聚合关系失败: %v", err)
+	}
+
+	if err := blockContacts(db, []string{"boss@example.com"}); err != nil {
+		t.Fatalf("blockContacts() error = %v", err)
+	}
+
+	var items []model.ContactBlacklist
+	if err := db.Order("address asc").Find(&items).Error; err != nil {
+		t.Fatalf("读取黑名单失败: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+	if items[0].Address != "boss@example.com" || items[1].Address != "ceo@example.com" {
+		t.Fatalf("blacklist addresses = %#v, want boss/ceo", []string{items[0].Address, items[1].Address})
+	}
+}
+
 func openContactTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := db.AutoMigrate(&model.ContactAggregation{}, &model.Message{}, &model.MailAccount{}); err != nil {
+	if err := db.AutoMigrate(&model.ContactAggregation{}, &model.ContactBlacklist{}, &model.Message{}, &model.MailAccount{}); err != nil {
 		t.Fatalf("迁移测试数据库失败: %v", err)
 	}
 	return db

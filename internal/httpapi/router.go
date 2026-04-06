@@ -536,6 +536,36 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		c.JSON(http.StatusOK, gin.H{"message": "联系人分离成功"})
 	})
 
+	protected.POST("/contacts/blacklist", func(c *gin.Context) {
+		var req struct {
+			Addresses []string `json:"addresses" binding:"required,min=1"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
+			return
+		}
+		if err := blockContacts(app.DB, req.Addresses); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "联系人已加入黑名单"})
+	})
+
+	protected.DELETE("/contacts/blacklist", func(c *gin.Context) {
+		var req struct {
+			Addresses []string `json:"addresses" binding:"required,min=1"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
+			return
+		}
+		if err := unblockContacts(app.DB, req.Addresses); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "联系人已移出黑名单"})
+	})
+
 	protected.GET("/contacts", func(c *gin.Context) {
 		page, pageSize := parsePageParams(c, app.Config.Mail.PageSize)
 		contacts, err := loadContactGroups(app.DB, strings.TrimSpace(c.Query("keyword")))
@@ -750,6 +780,7 @@ type contactItem struct {
 	Total        int64            `json:"total"`
 	MemberCount  int              `json:"member_count"`
 	Members      []contactMember  `json:"members"`
+	IsBlocked    bool             `json:"is_blocked"`
 }
 
 // contactSummary 保存按原始发件人聚合后的基础联系人数据，便于后续再做联系人聚合计算。
@@ -795,10 +826,110 @@ func loadContactGroups(db *gorm.DB, keyword string) ([]contactItem, error) {
 		return nil, err
 	}
 	groups := groupContacts(summaries, mappings)
+	blacklist, err := loadContactBlacklistSet(db)
+	if err != nil {
+		return nil, err
+	}
+	groups = ensureBlockedContactsVisible(groups, mappings, blacklist)
+	applyContactBlockedState(groups, blacklist)
 	if strings.TrimSpace(keyword) != "" {
 		groups = filterContactGroupsByKeyword(groups, keyword)
 	}
 	return groups, nil
+}
+
+// loadContactBlacklistSet 统一读取联系人黑名单，避免列表展示和同步过滤各自维护不同口径。
+func loadContactBlacklistSet(db *gorm.DB) (map[string]struct{}, error) {
+	var items []model.ContactBlacklist
+	if err := db.Find(&items).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		address := normalizeContactAddress(item.Address)
+		if address == "" {
+			continue
+		}
+		result[address] = struct{}{}
+	}
+	return result, nil
+}
+
+// applyContactBlockedState 仅当整个联系人组都已被拉黑时才标记组状态，避免部分成员被误展示成整组已拉黑。
+func applyContactBlockedState(groups []contactItem, blacklist map[string]struct{}) {
+	for index := range groups {
+		if len(groups[index].Members) == 0 {
+			_, groups[index].IsBlocked = blacklist[groups[index].Address]
+			continue
+		}
+		groups[index].IsBlocked = true
+		for _, member := range groups[index].Members {
+			if _, ok := blacklist[member.Address]; ok {
+				continue
+			}
+			groups[index].IsBlocked = false
+			break
+		}
+	}
+}
+
+// ensureBlockedContactsVisible 把仅存在于黑名单中的联系人也补进列表，避免无历史邮件后失去解除拉黑入口。
+func ensureBlockedContactsVisible(groups []contactItem, mappings map[string]string, blacklist map[string]struct{}) []contactItem {
+	if len(blacklist) == 0 {
+		return groups
+	}
+	groupMap := make(map[string]*contactItem, len(groups))
+	for index := range groups {
+		group := groups[index]
+		groupMap[group.Address] = &groups[index]
+	}
+	for _, address := range uniqueContactAddresses(append(contactMappingAddresses(mappings), mapKeys(blacklist)...)) {
+		if _, ok := blacklist[address]; !ok {
+			continue
+		}
+		root := resolveContactPrimary(address, mappings)
+		item, ok := groupMap[root]
+		if !ok {
+			groups = append(groups, contactItem{Address: root, Members: make([]contactMember, 0, 1)})
+			item = &groups[len(groups)-1]
+			groupMap[root] = item
+		}
+		appendContactMember(item, contactMember{Address: address})
+	}
+	for index := range groups {
+		if groups[index].MemberCount > 0 {
+			continue
+		}
+		sort.Slice(groups[index].Members, func(i int, j int) bool {
+			left := groups[index].Members[i]
+			right := groups[index].Members[j]
+			if left.Address == groups[index].Address {
+				return true
+			}
+			if right.Address == groups[index].Address {
+				return false
+			}
+			return left.Address < right.Address
+		})
+		groups[index].MemberCount = len(groups[index].Members)
+		groups[index].Name = chooseContactGroupName(groups[index])
+	}
+	sort.Slice(groups, func(i int, j int) bool {
+		if groups[i].LatestSentAt != groups[j].LatestSentAt {
+			return isContactTimestampAfter(groups[i].LatestSentAt, groups[j].LatestSentAt)
+		}
+		return groups[i].Address < groups[j].Address
+	})
+	return groups
+}
+
+// mapKeys 把集合键拉平成切片，避免为补齐黑名单联系人重复写一套遍历逻辑。
+func mapKeys(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // loadContactSummaries 只从真实邮件发件人中提取联系人，避免把聚合逻辑耦合进数据库方言相关 SQL。
@@ -1161,6 +1292,58 @@ func separateContacts(db *gorm.DB, addresses []string) error {
 		}
 		return nil
 	})
+}
+
+// blockContacts 把联系人或整组联系人加入黑名单，后续同步会直接跳过这些发件人。
+func blockContacts(db *gorm.DB, addresses []string) error {
+	targets, err := expandBlacklistTargets(db, addresses)
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		return errors.New("请选择要加入黑名单的联系人")
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, address := range targets {
+			record := model.ContactBlacklist{Address: address}
+			if err := tx.Where("address = ?", address).FirstOrCreate(&record).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// unblockContacts 支持按当前联系人或整组联系人恢复收信，避免前端必须逐个成员取消黑名单。
+func unblockContacts(db *gorm.DB, addresses []string) error {
+	targets, err := expandBlacklistTargets(db, addresses)
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		return errors.New("请选择要移出黑名单的联系人")
+	}
+	return db.Where("address IN ?", targets).Delete(&model.ContactBlacklist{}).Error
+}
+
+// expandBlacklistTargets 先做邮箱校验，再按联系人聚合关系展开整组成员，保证黑名单规则与联系人展示口径一致。
+func expandBlacklistTargets(db *gorm.DB, addresses []string) ([]string, error) {
+	validated := make([]string, 0, len(addresses))
+	for _, item := range addresses {
+		address, err := canonicalContactAddress(item)
+		if err != nil {
+			return nil, err
+		}
+		validated = append(validated, address)
+	}
+	if len(validated) == 0 {
+		return nil, nil
+	}
+	targets, err := expandContactAddresses(db, validated)
+	if err != nil {
+		return nil, fmt.Errorf("查询联系人聚合关系失败: %w", err)
+	}
+	return uniqueContactAddresses(targets), nil
 }
 
 // resolveContactPrimary 按映射链找到最终主联系人，并在异常循环时降级返回当前地址避免死循环。
