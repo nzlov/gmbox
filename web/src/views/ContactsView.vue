@@ -20,9 +20,6 @@
                 <q-item-section>
                   <q-item-label class="row items-center no-wrap gmbox-inline-gap-sm">
                     <span class="ellipsis">{{ item.name || item.address }}</span>
-                    <q-icon v-if="item.member_count > 1" name="hub" size="18px">
-                      <q-tooltip>已聚合 {{ item.member_count }} 个联系人</q-tooltip>
-                    </q-icon>
                     <q-btn
                       v-if="item.member_count > 1"
                       flat
@@ -30,10 +27,10 @@
                       dense
                       size="sm"
                       color="secondary"
-                      icon="edit"
+                      icon="hub"
                       @click.stop="openEditAggregateDialog(item)"
                     >
-                      <q-tooltip>编辑聚合</q-tooltip>
+                      <q-tooltip>已聚合 {{ item.member_count }} 个联系人，点击编辑</q-tooltip>
                     </q-btn>
                   </q-item-label>
                   <q-item-label caption :class="selectedAddress === item.address ? 'text-white' : 'text-grey-6'">{{ item.address }}</q-item-label>
