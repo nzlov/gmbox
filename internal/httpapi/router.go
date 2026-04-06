@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -487,50 +488,78 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		c.JSON(http.StatusOK, mailboxes)
 	})
 
-	protected.GET("/contacts", func(c *gin.Context) {
-		type contactItem struct {
-			Address      string           `json:"address"`
-			Name         string           `json:"name"`
-			LatestSentAt contactTimestamp `json:"latest_sent_at"`
-			Total        int64            `json:"total"`
+	protected.POST("/contacts/aggregate", func(c *gin.Context) {
+		var req struct {
+			PrimaryAddress string   `json:"primary_address" binding:"required"`
+			Addresses      []string `json:"addresses" binding:"required"`
 		}
-
-		page, pageSize := parsePageParams(c, app.Config.Mail.PageSize)
-		base := app.DB.Table("messages").
-			Select("from_address AS address, MAX(from_name) AS name, MAX(sent_at) AS latest_sent_at, COUNT(*) AS total").
-			Where("is_deleted = ? AND TRIM(from_address) <> ''", false).
-			Where("from_address NOT IN (?)", app.DB.Model(&model.MailAccount{}).Select("email")).
-			Group("from_address")
-		if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
-			like := "%" + keyword + "%"
-			base = base.Where("from_address LIKE ? OR from_name LIKE ?", like, like)
-		}
-
-		var total int64
-		if err := app.DB.Table("(?) AS contacts", base).Count(&total).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "统计联系人失败"})
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
 			return
 		}
+		if err := aggregateContacts(app.DB, req.PrimaryAddress, req.Addresses); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "联系人聚合成功"})
+	})
 
-		var contacts []contactItem
-		if err := app.DB.Table("(?) AS contacts", base).
-			Order("latest_sent_at desc, address asc").
-			Offset((page - 1) * pageSize).
-			Limit(pageSize).
-			Find(&contacts).Error; err != nil {
+	protected.PUT("/contacts/aggregate", func(c *gin.Context) {
+		var req struct {
+			CurrentAddress string   `json:"current_address" binding:"required"`
+			PrimaryAddress string   `json:"primary_address" binding:"required"`
+			Addresses      []string `json:"addresses" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
+			return
+		}
+		if err := updateContactAggregation(app.DB, req.CurrentAddress, req.PrimaryAddress, req.Addresses); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "联系人聚合更新成功"})
+	})
+
+	protected.POST("/contacts/separate", func(c *gin.Context) {
+		var req struct {
+			Addresses []string `json:"addresses" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
+			return
+		}
+		if err := separateContacts(app.DB, req.Addresses); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "联系人分离成功"})
+	})
+
+	protected.GET("/contacts", func(c *gin.Context) {
+		page, pageSize := parsePageParams(c, app.Config.Mail.PageSize)
+		contacts, err := loadContactGroups(app.DB, strings.TrimSpace(c.Query("keyword")))
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询联系人失败"})
 			return
 		}
+		total := int64(len(contacts))
+		start := (page - 1) * pageSize
+		if start > len(contacts) {
+			start = len(contacts)
+		}
+		end := start + pageSize
+		if end > len(contacts) {
+			end = len(contacts)
+		}
+		contacts = contacts[start:end]
 		c.JSON(http.StatusOK, gin.H{"items": contacts, "total": total, "page": page, "page_size": pageSize})
 	})
 
 	protected.GET("/contact-messages", func(c *gin.Context) {
-		address := strings.TrimSpace(c.Query("address"))
+		address := normalizeContactAddress(c.Query("address"))
 		page, pageSize := parsePageParams(c, app.Config.Mail.PageSize)
 		query := app.DB.Model(&model.Message{}).Where("is_deleted = ?", false)
-		if address != "" {
-			query = query.Where("from_address = ? OR to_addresses LIKE ?", address, "%@%")
-		}
 
 		var candidates []model.Message
 		if err := query.Order("sent_at desc, id desc").Find(&candidates).Error; err != nil {
@@ -539,7 +568,12 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		}
 		messages := candidates
 		if address != "" {
-			messages = filterContactMessages(candidates, address)
+			addresses, err := expandContactAddresses(app.DB, []string{address})
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "查询联系人聚合关系失败"})
+				return
+			}
+			messages = filterContactMessages(candidates, addresses)
 		}
 		total := int64(len(messages))
 		start := (page - 1) * pageSize
@@ -702,6 +736,30 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 	})
 }
 
+// contactMember 用于向前端展示聚合组里包含的具体联系人，方便查看和分离。
+type contactMember struct {
+	Address string `json:"address"`
+	Name    string `json:"name"`
+}
+
+// contactItem 表示联系人页的单个聚合结果，主联系人本身也会作为只有一个成员的组返回。
+type contactItem struct {
+	Address      string           `json:"address"`
+	Name         string           `json:"name"`
+	LatestSentAt contactTimestamp `json:"latest_sent_at"`
+	Total        int64            `json:"total"`
+	MemberCount  int              `json:"member_count"`
+	Members      []contactMember  `json:"members"`
+}
+
+// contactSummary 保存按原始发件人聚合后的基础联系人数据，便于后续再做联系人聚合计算。
+type contactSummary struct {
+	Address      string
+	Name         string
+	LatestSentAt contactTimestamp
+	Total        int64
+}
+
 // contactTimestamp 兼容不同数据库驱动对聚合时间列返回 string 或 time.Time 的差异。
 type contactTimestamp string
 
@@ -724,6 +782,457 @@ func (t *contactTimestamp) Scan(value any) error {
 	default:
 		return fmt.Errorf("不支持的联系人时间类型: %T", value)
 	}
+}
+
+// loadContactGroups 先按原始发件人汇总，再按联系人聚合关系折叠成前端可直接展示的组。
+func loadContactGroups(db *gorm.DB, keyword string) ([]contactItem, error) {
+	summaries, err := loadContactSummaries(db)
+	if err != nil {
+		return nil, err
+	}
+	mappings, err := loadContactAggregationMap(db)
+	if err != nil {
+		return nil, err
+	}
+	groups := groupContacts(summaries, mappings)
+	if strings.TrimSpace(keyword) != "" {
+		groups = filterContactGroupsByKeyword(groups, keyword)
+	}
+	return groups, nil
+}
+
+// loadContactSummaries 只从真实邮件发件人中提取联系人，避免把聚合逻辑耦合进数据库方言相关 SQL。
+func loadContactSummaries(db *gorm.DB) ([]contactSummary, error) {
+	var summaries []contactSummary
+	err := db.Table("messages").
+		Select("from_address AS address, MAX(from_name) AS name, MAX(sent_at) AS latest_sent_at, COUNT(*) AS total").
+		Where("is_deleted = ? AND TRIM(from_address) <> ''", false).
+		Where("from_address NOT IN (?)", db.Model(&model.MailAccount{}).Select("email")).
+		Group("from_address").
+		Find(&summaries).Error
+	if err != nil {
+		return nil, err
+	}
+	return summaries, nil
+}
+
+// loadContactAggregationMap 统一读取聚合映射并做地址归一化，避免大小写不同导致同一邮箱被拆成多个组。
+func loadContactAggregationMap(db *gorm.DB) (map[string]string, error) {
+	var items []model.ContactAggregation
+	if err := db.Find(&items).Error; err != nil {
+		return nil, err
+	}
+	mappings := make(map[string]string, len(items))
+	for _, item := range items {
+		address := normalizeContactAddress(item.Address)
+		primary := normalizeContactAddress(item.PrimaryAddress)
+		if address == "" || primary == "" || address == primary {
+			continue
+		}
+		mappings[address] = primary
+	}
+	return mappings, nil
+}
+
+// groupContacts 把原始联系人按主联系人折叠，确保列表统计和成员清单始终以同一套映射关系计算。
+func groupContacts(summaries []contactSummary, mappings map[string]string) []contactItem {
+	groupMap := make(map[string]*contactItem)
+	for _, summary := range summaries {
+		address := normalizeContactAddress(summary.Address)
+		if address == "" {
+			continue
+		}
+		root := resolveContactPrimary(address, mappings)
+		item, ok := groupMap[root]
+		if !ok {
+			item = &contactItem{Address: root, Members: make([]contactMember, 0, 1)}
+			groupMap[root] = item
+		}
+		item.Total += summary.Total
+		if isContactTimestampAfter(summary.LatestSentAt, item.LatestSentAt) {
+			item.LatestSentAt = summary.LatestSentAt
+		}
+		appendContactMember(item, contactMember{Address: address, Name: strings.TrimSpace(summary.Name)})
+	}
+	for _, address := range uniqueContactAddresses(contactMappingAddresses(mappings)) {
+		root := resolveContactPrimary(address, mappings)
+		item, ok := groupMap[root]
+		if !ok {
+			item = &contactItem{Address: root, Members: make([]contactMember, 0, 1)}
+			groupMap[root] = item
+		}
+		appendContactMember(item, contactMember{Address: address})
+	}
+
+	groups := make([]contactItem, 0, len(groupMap))
+	for _, item := range groupMap {
+		sort.Slice(item.Members, func(i int, j int) bool {
+			left := item.Members[i]
+			right := item.Members[j]
+			if left.Address == item.Address {
+				return true
+			}
+			if right.Address == item.Address {
+				return false
+			}
+			return left.Address < right.Address
+		})
+		item.MemberCount = len(item.Members)
+		item.Name = chooseContactGroupName(*item)
+		groups = append(groups, *item)
+	}
+
+	sort.Slice(groups, func(i int, j int) bool {
+		if groups[i].LatestSentAt != groups[j].LatestSentAt {
+			return isContactTimestampAfter(groups[i].LatestSentAt, groups[j].LatestSentAt)
+		}
+		return groups[i].Address < groups[j].Address
+	})
+	return groups
+}
+
+// appendContactMember 合并同一成员的显示信息，确保手动加入但尚无历史邮件的邮箱也能保留在聚合组中。
+func appendContactMember(item *contactItem, member contactMember) {
+	for index, existing := range item.Members {
+		if existing.Address != member.Address {
+			continue
+		}
+		if strings.TrimSpace(item.Members[index].Name) == "" && strings.TrimSpace(member.Name) != "" {
+			item.Members[index].Name = strings.TrimSpace(member.Name)
+		}
+		return
+	}
+	item.Members = append(item.Members, contactMember{Address: member.Address, Name: strings.TrimSpace(member.Name)})
+}
+
+// contactMappingAddresses 把映射里的主成员地址都提取出来，避免手工追加的邮箱因为暂时没有邮件而从聚合组里消失。
+func contactMappingAddresses(mappings map[string]string) []string {
+	addresses := make([]string, 0, len(mappings)*2)
+	for address, primary := range mappings {
+		addresses = append(addresses, address, primary)
+	}
+	return addresses
+}
+
+// chooseContactGroupName 优先复用主联系人的名字，避免聚合后列表标题在刷新时来回跳变。
+func chooseContactGroupName(item contactItem) string {
+	for _, member := range item.Members {
+		if member.Address == item.Address && strings.TrimSpace(member.Name) != "" {
+			return strings.TrimSpace(member.Name)
+		}
+	}
+	for _, member := range item.Members {
+		if strings.TrimSpace(member.Name) != "" {
+			return strings.TrimSpace(member.Name)
+		}
+	}
+	return item.Address
+}
+
+// filterContactGroupsByKeyword 让搜索同时命中主联系人和聚合成员，避免成员被聚合后无法被检索到。
+func filterContactGroupsByKeyword(groups []contactItem, keyword string) []contactItem {
+	needle := strings.ToLower(strings.TrimSpace(keyword))
+	if needle == "" {
+		return groups
+	}
+	filtered := make([]contactItem, 0, len(groups))
+	for _, item := range groups {
+		if strings.Contains(strings.ToLower(item.Address), needle) || strings.Contains(strings.ToLower(item.Name), needle) {
+			filtered = append(filtered, item)
+			continue
+		}
+		matched := false
+		for _, member := range item.Members {
+			if strings.Contains(strings.ToLower(member.Address), needle) || strings.Contains(strings.ToLower(member.Name), needle) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+// expandContactAddresses 把传入联系人扩展成所在聚合组的全部成员，保证联系人邮件列表按聚合口径加载。
+func expandContactAddresses(db *gorm.DB, addresses []string) ([]string, error) {
+	mappings, err := loadContactAggregationMap(db)
+	if err != nil {
+		return nil, err
+	}
+	knownAddresses, err := loadKnownContactAddresses(db, mappings)
+	if err != nil {
+		return nil, err
+	}
+	return expandContactGroupMembers(addresses, mappings, knownAddresses), nil
+}
+
+// loadKnownContactAddresses 汇总真实联系人和聚合映射里的地址，避免分组展开时漏掉仅存在于映射中的成员。
+func loadKnownContactAddresses(db *gorm.DB, mappings map[string]string) ([]string, error) {
+	summaries, err := loadContactSummaries(db)
+	if err != nil {
+		return nil, err
+	}
+	known := make([]string, 0, len(summaries)+len(mappings)*2)
+	for _, item := range summaries {
+		known = append(known, normalizeContactAddress(item.Address))
+	}
+	for address, primary := range mappings {
+		known = append(known, address, primary)
+	}
+	return uniqueContactAddresses(known), nil
+}
+
+// expandContactGroupMembers 把任意选中的联系人展开成完整分组，便于组合聚合和整组分离时保持结果可预期。
+func expandContactGroupMembers(addresses []string, mappings map[string]string, knownAddresses []string) []string {
+	groups := buildContactGroupMembers(knownAddresses, mappings)
+	expanded := make([]string, 0, len(addresses))
+	seen := make(map[string]struct{})
+	for _, raw := range addresses {
+		address := normalizeContactAddress(raw)
+		if address == "" {
+			continue
+		}
+		root := resolveContactPrimary(address, mappings)
+		members := groups[root]
+		if len(members) == 0 {
+			members = []string{address}
+		}
+		for _, member := range members {
+			if _, ok := seen[member]; ok {
+				continue
+			}
+			seen[member] = struct{}{}
+			expanded = append(expanded, member)
+		}
+	}
+	return expanded
+}
+
+// buildContactGroupMembers 预先构建主联系人到全部成员的索引，避免多次展开时重复遍历映射。
+func buildContactGroupMembers(addresses []string, mappings map[string]string) map[string][]string {
+	groups := make(map[string][]string)
+	for _, raw := range uniqueContactAddresses(addresses) {
+		address := normalizeContactAddress(raw)
+		if address == "" {
+			continue
+		}
+		root := resolveContactPrimary(address, mappings)
+		groups[root] = append(groups[root], address)
+	}
+	for root := range groups {
+		sort.Strings(groups[root])
+	}
+	return groups
+}
+
+// aggregateContacts 把多个联系人或联系人组并到同一个主联系人下，保证后续列表统计和邮件查询统一收口。
+func aggregateContacts(db *gorm.DB, primaryAddress string, addresses []string) error {
+	primary, err := canonicalContactAddress(primaryAddress)
+	if err != nil {
+		return err
+	}
+	mappings, err := loadContactAggregationMap(db)
+	if err != nil {
+		return fmt.Errorf("查询联系人聚合关系失败: %w", err)
+	}
+	knownAddresses, err := loadKnownContactAddresses(db, mappings)
+	if err != nil {
+		return fmt.Errorf("查询联系人失败: %w", err)
+	}
+	normalizedAddresses := make([]string, 0, len(addresses)+1)
+	for _, item := range append(addresses, primary) {
+		address, addressErr := canonicalContactAddress(item)
+		if addressErr != nil {
+			return addressErr
+		}
+		normalizedAddresses = append(normalizedAddresses, address)
+	}
+	expanded := expandContactGroupMembers(normalizedAddresses, mappings, knownAddresses)
+	members := make([]string, 0, len(expanded))
+	for _, item := range expanded {
+		if item == primary {
+			continue
+		}
+		members = append(members, item)
+	}
+	if len(members) == 0 {
+		return errors.New("请至少选择两个不同联系人进行聚合")
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("address = ?", primary).Delete(&model.ContactAggregation{}).Error; err != nil {
+			return err
+		}
+		for _, member := range members {
+			record := model.ContactAggregation{Address: member, PrimaryAddress: primary}
+			if err := tx.Where("address = ?", member).Assign(record).FirstOrCreate(&record).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// updateContactAggregation 在一个事务里替换整个聚合组，避免前端编辑时先拆后建造成中途失败后原关系丢失。
+func updateContactAggregation(db *gorm.DB, currentAddress string, primaryAddress string, addresses []string) error {
+	current, err := canonicalContactAddress(currentAddress)
+	if err != nil {
+		return err
+	}
+	primary, err := canonicalContactAddress(primaryAddress)
+	if err != nil {
+		return err
+	}
+	mappings, err := loadContactAggregationMap(db)
+	if err != nil {
+		return fmt.Errorf("查询联系人聚合关系失败: %w", err)
+	}
+	knownAddresses, err := loadKnownContactAddresses(db, mappings)
+	if err != nil {
+		return fmt.Errorf("查询联系人失败: %w", err)
+	}
+	currentMembers := expandContactGroupMembers([]string{current}, mappings, knownAddresses)
+	normalizedAddresses := make([]string, 0, len(addresses)+1)
+	for _, item := range addresses {
+		address, addressErr := canonicalContactAddress(item)
+		if addressErr != nil {
+			return addressErr
+		}
+		normalizedAddresses = append(normalizedAddresses, address)
+	}
+	normalizedAddresses = append(normalizedAddresses, primary)
+	nextMembers := uniqueContactAddresses(normalizedAddresses)
+	if len(nextMembers) == 0 {
+		return errors.New("请选择联系人")
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		currentRoots := uniqueContactAddresses(append(currentMembers, current))
+		for _, item := range currentRoots {
+			root := resolveContactPrimary(item, mappings)
+			if root == "" {
+				continue
+			}
+			if err := tx.Where("primary_address = ?", root).Delete(&model.ContactAggregation{}).Error; err != nil {
+				return err
+			}
+		}
+		if len(nextMembers) == 1 {
+			return tx.Where("address = ?", primary).Delete(&model.ContactAggregation{}).Error
+		}
+		if err := tx.Where("address = ?", primary).Delete(&model.ContactAggregation{}).Error; err != nil {
+			return err
+		}
+		for _, member := range nextMembers {
+			if member == primary {
+				continue
+			}
+			record := model.ContactAggregation{Address: member, PrimaryAddress: primary}
+			if err := tx.Where("address = ?", member).Assign(record).FirstOrCreate(&record).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// separateContacts 允许按成员分离，也支持传入主联系人时直接解散整个聚合组。
+func separateContacts(db *gorm.DB, addresses []string) error {
+	targets := uniqueContactAddresses(addresses)
+	if len(targets) == 0 {
+		return errors.New("请选择要分离的联系人")
+	}
+	mappings, err := loadContactAggregationMap(db)
+	if err != nil {
+		return fmt.Errorf("查询联系人聚合关系失败: %w", err)
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, target := range targets {
+			root := resolveContactPrimary(target, mappings)
+			if root == target {
+				if err := tx.Where("primary_address = ?", root).Delete(&model.ContactAggregation{}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if err := tx.Where("address = ?", target).Delete(&model.ContactAggregation{}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// resolveContactPrimary 按映射链找到最终主联系人，并在异常循环时降级返回当前地址避免死循环。
+func resolveContactPrimary(address string, mappings map[string]string) string {
+	current := normalizeContactAddress(address)
+	seen := map[string]struct{}{}
+	for current != "" {
+		next, ok := mappings[current]
+		if !ok || next == "" {
+			return current
+		}
+		if _, duplicated := seen[current]; duplicated {
+			return current
+		}
+		seen[current] = struct{}{}
+		current = normalizeContactAddress(next)
+	}
+	return ""
+}
+
+// normalizeContactAddress 统一清理邮箱地址格式，避免大小写和首尾空格造成重复联系人。
+func normalizeContactAddress(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// canonicalContactAddress 校验并规范邮箱地址，避免把无效字符串写入聚合映射后污染联系人列表。
+func canonicalContactAddress(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", errors.New("邮箱地址不能为空")
+	}
+	parsed, err := stdmail.ParseAddress(trimmed)
+	if err != nil {
+		return "", errors.New("邮箱地址格式不合法")
+	}
+	return normalizeContactAddress(parsed.Address), nil
+}
+
+// uniqueContactAddresses 保持输入顺序去重，避免前端多选和整组展开后出现重复成员。
+func uniqueContactAddresses(addresses []string) []string {
+	result := make([]string, 0, len(addresses))
+	seen := make(map[string]struct{}, len(addresses))
+	for _, raw := range addresses {
+		address := normalizeContactAddress(raw)
+		if address == "" {
+			continue
+		}
+		if _, ok := seen[address]; ok {
+			continue
+		}
+		seen[address] = struct{}{}
+		result = append(result, address)
+	}
+	return result
+}
+
+// isContactTimestampAfter 统一比较联系人时间，避免不同数据库驱动字符串格式差异导致排序不稳定。
+func isContactTimestampAfter(left contactTimestamp, right contactTimestamp) bool {
+	leftText := strings.TrimSpace(string(left))
+	rightText := strings.TrimSpace(string(right))
+	if rightText == "" {
+		return leftText != ""
+	}
+	if leftText == "" {
+		return false
+	}
+	leftTime, leftErr := time.Parse(time.RFC3339Nano, leftText)
+	rightTime, rightErr := time.Parse(time.RFC3339Nano, rightText)
+	if leftErr == nil && rightErr == nil {
+		return leftTime.After(rightTime)
+	}
+	return leftText > rightText
 }
 
 // registerFrontend 让非 API 请求统一交给前端路由处理。
@@ -1014,25 +1523,35 @@ func isHexColor(value string) bool {
 	return hexColorPattern.MatchString(strings.TrimSpace(value))
 }
 
-// filterContactMessages 对收件人列表做标准地址精确匹配，避免邮箱子串误命中无关邮件。
-func filterContactMessages(messages []model.Message, address string) []model.Message {
+// filterContactMessages 对聚合组里的全部联系人做精确匹配，避免联系人聚合后列表仍只显示单个成员邮件。
+func filterContactMessages(messages []model.Message, addresses []string) []model.Message {
+	addressSet := make(map[string]struct{}, len(addresses))
+	for _, address := range uniqueContactAddresses(addresses) {
+		addressSet[address] = struct{}{}
+	}
+	if len(addressSet) == 0 {
+		return []model.Message{}
+	}
 	filtered := make([]model.Message, 0, len(messages))
 	for _, item := range messages {
-		if strings.EqualFold(strings.TrimSpace(item.FromAddress), address) || addressInMessageList(item.ToAddresses, address) {
+		if _, ok := addressSet[normalizeContactAddress(item.FromAddress)]; ok || addressInMessageList(item.ToAddresses, addressSet) {
 			filtered = append(filtered, item)
 		}
 	}
 	return filtered
 }
 
-// addressInMessageList 尝试按 RFC822 地址列表解析收件人字段，确保联系人筛选按完整邮箱而不是子串判断。
-func addressInMessageList(raw string, target string) bool {
+// addressInMessageList 尝试按 RFC822 地址列表解析收件人字段，确保聚合联系人筛选仍按完整邮箱精确匹配。
+func addressInMessageList(raw string, targets map[string]struct{}) bool {
+	if len(targets) == 0 {
+		return false
+	}
 	list, err := stdmail.ParseAddressList(raw)
 	if err != nil {
 		return false
 	}
 	for _, item := range list {
-		if strings.EqualFold(strings.TrimSpace(item.Address), target) {
+		if _, ok := targets[normalizeContactAddress(item.Address)]; ok {
 			return true
 		}
 	}

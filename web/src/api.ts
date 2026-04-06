@@ -116,11 +116,18 @@ export interface MessageDetailResponse {
   attachments: AttachmentItem[]
 }
 
+export interface ContactMember {
+  address: string
+  name: string
+}
+
 export interface ContactItem {
   address: string
   name: string
   latest_sent_at: string
   total: number
+  member_count: number
+  members: ContactMember[]
 }
 
 export interface ContactListResponse {

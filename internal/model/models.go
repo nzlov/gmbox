@@ -98,6 +98,13 @@ type Attachment struct {
 	StoragePath string `gorm:"size:500" json:"storage_path"`
 }
 
+// ContactAggregation 保存成员联系人与主联系人的映射，避免改动原始邮件数据也能完成聚合展示。
+type ContactAggregation struct {
+	utilsdb.Model
+	Address        string `gorm:"size:255;uniqueIndex;not null" json:"address"`
+	PrimaryAddress string `gorm:"size:255;index;not null" json:"primary_address"`
+}
+
 // SyncState 保存邮箱同步状态和最近错误。
 type SyncState struct {
 	utilsdb.Model
