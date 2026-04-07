@@ -765,12 +765,15 @@ async function batchUpdateEnabled(enabled: boolean) {
   }
 }
 
-// batchSync 对选中的邮箱逐一发起同步，保持现有后端接口不变。
+// batchSync 走后端批量同步接口，确保一轮多邮箱同步只产生一条聚合日志。
 async function batchSync() {
   message.value = ''
   error.value = ''
   try {
-    await Promise.all(selectedRows.value.map((item) => request(`/api/accounts/${item.id}/sync`, { method: 'POST' })))
+    await request('/api/accounts/sync', {
+      method: 'POST',
+      body: JSON.stringify({ ids: selectedRows.value.map((item) => item.id) }),
+    })
     message.value = '批量同步完成'
   } catch (err) {
     error.value = err instanceof Error ? err.message : '批量同步失败'

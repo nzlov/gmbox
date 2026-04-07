@@ -371,6 +371,30 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 		})
 	})
 
+	protected.POST("/accounts/sync", func(c *gin.Context) {
+		var req struct {
+			IDs []uint `json:"ids" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || len(req.IDs) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求参数不合法"})
+			return
+		}
+		var accounts []model.MailAccount
+		if err := app.DB.Where("id IN ?", req.IDs).Find(&accounts).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询邮箱失败"})
+			return
+		}
+		if len(accounts) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "未找到可同步的邮箱"})
+			return
+		}
+		if err := app.Syncer.RunAccountsNow(c.Request.Context(), accounts); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "批量同步已完成"})
+	})
+
 	protected.PUT("/accounts/:id", func(c *gin.Context) {
 		account, ok := loadAccount(c, app.DB)
 		if !ok {
@@ -749,9 +773,6 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 	protected.GET("/sync-logs", func(c *gin.Context) {
 		var logs []model.SyncLog
 		query := app.DB.Model(&model.SyncLog{}).Order("started_at desc, id desc")
-		if accountID := strings.TrimSpace(c.Query("account_id")); accountID != "" {
-			query = query.Where("account_id = ?", accountID)
-		}
 		page, pageSize := parsePageParams(c, 20)
 		var total int64
 		if err := query.Count(&total).Error; err != nil {
@@ -762,8 +783,43 @@ func registerProtected(api *gin.RouterGroup, app *runtime.App) {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "查询同步日志失败"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": logs, "total": total, "page": page, "page_size": pageSize})
+		items := make([]syncLogResponse, 0, len(logs))
+		for _, item := range logs {
+			items = append(items, buildSyncLogResponse(item))
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "page": page, "page_size": pageSize})
 	})
+}
+
+// syncLogResponse 统一把聚合日志和邮箱明细整理成前端直接可用的结构。
+type syncLogResponse struct {
+	model.SyncLog
+	Details []model.SyncLogDetail `json:"details"`
+}
+
+// buildSyncLogResponse 把聚合日志明细解析成前端直接可用的结构。
+func buildSyncLogResponse(item model.SyncLog) syncLogResponse {
+	response := syncLogResponse{SyncLog: item, Details: []model.SyncLogDetail{}}
+	if strings.TrimSpace(item.Details) == "" {
+		return response
+	}
+	if err := json.Unmarshal([]byte(item.Details), &response.Details); err != nil {
+		response.Details = []model.SyncLogDetail{}
+	}
+	if response.AccountCount == 0 && len(response.Details) > 0 {
+		response.AccountCount = len(response.Details)
+	}
+	if response.SuccessCount == 0 && response.AccountCount > 0 {
+		for _, item := range response.Details {
+			if item.Success {
+				response.SuccessCount++
+			}
+		}
+	}
+	if response.SuccessRate == 0 && response.AccountCount > 0 {
+		response.SuccessRate = float64(response.SuccessCount) / float64(response.AccountCount) * 100
+	}
+	return response
 }
 
 // contactMember 用于向前端展示聚合组里包含的具体联系人，方便查看和分离。
@@ -1628,7 +1684,7 @@ func newMessageResponse(message model.Message, accountEmail string) messageRespo
 	return messageResponse{Message: message, AccountEmail: accountEmail}
 }
 
-// deleteAccountCascade 在删除邮箱时一并清理邮件、正文、附件和同步记录，避免留下孤儿数据。
+// deleteAccountCascade 在删除邮箱时一并清理邮件、正文和附件，避免留下孤儿数据。
 func deleteAccountCascade(db *gorm.DB, accountID uint) error {
 	if accountID == 0 {
 		return nil
@@ -1663,9 +1719,6 @@ func deleteAccountCascade(db *gorm.DB, accountID uint) error {
 			return err
 		}
 		if err := tx.Where("account_id = ?", accountID).Unscoped().Delete(&model.SyncState{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("account_id = ?", accountID).Unscoped().Delete(&model.SyncLog{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Unscoped().Delete(&model.MailAccount{}, accountID).Error; err != nil {

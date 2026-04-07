@@ -1,6 +1,10 @@
 package mail
 
-import "testing"
+import (
+	"testing"
+
+	"gmbox/internal/model"
+)
 
 // TestShouldRetryOAuthSync 确认只有认证或 token 相关错误才会触发自动刷新重试。
 func TestShouldRetryOAuthSync(t *testing.T) {
@@ -26,6 +30,29 @@ func TestSyncResultZeroValue(t *testing.T) {
 	result := &SyncResult{}
 	if result.NewMessages != 0 || result.MailboxCount != 0 {
 		t.Fatalf("unexpected zero value result: %+v", result)
+	}
+}
+
+// TestSummarizeSyncLog 确认聚合同步统计会稳定返回总邮箱数、成功数和成功率。
+func TestSummarizeSyncLog(t *testing.T) {
+	results := []model.SyncLogDetail{
+		{AccountEmail: "a@example.com", Success: true, NewMessages: 3, DurationMs: 1200},
+		{AccountEmail: "b@example.com", Success: false, DurationMs: 800, ErrorMessage: "连接失败"},
+		{AccountEmail: "c@example.com", Success: true, NewMessages: 1, DurationMs: 600},
+	}
+
+	accountCount, successCount, successRate, summary := summarizeSyncLog(results)
+	if accountCount != 3 {
+		t.Fatalf("accountCount = %d, want 3", accountCount)
+	}
+	if successCount != 2 {
+		t.Fatalf("successCount = %d, want 2", successCount)
+	}
+	if successRate != 66.66666666666666 {
+		t.Fatalf("successRate = %v, want 66.66666666666666", successRate)
+	}
+	if summary != "本轮同步 3 个邮箱，成功 2 个，成功率 67%" {
+		t.Fatalf("summary = %q, want %q", summary, "本轮同步 3 个邮箱，成功 2 个，成功率 67%")
 	}
 }
 

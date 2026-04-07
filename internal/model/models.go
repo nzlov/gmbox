@@ -127,21 +127,27 @@ type SyncState struct {
 	LastMessageAt *time.Time `json:"last_message_at"`
 }
 
-// SyncLog 保存每次同步执行的历史结果，便于排查问题和查看趋势。
+// SyncLogDetail 保存单个邮箱的同步结果，避免聚合日志丢失邮箱级排查信息。
+type SyncLogDetail struct {
+	AccountID    uint   `json:"account_id"`
+	AccountName  string `json:"account_name"`
+	AccountEmail string `json:"account_email"`
+	Success      bool   `json:"success"`
+	NewMessages  int    `json:"new_messages"`
+	DurationMs   int64  `json:"duration_ms"`
+	ErrorMessage string `json:"error_message"`
+}
+
+// SyncLog 保存一次同步批次的聚合结果，便于控制日志数量同时保留邮箱明细。
 type SyncLog struct {
 	utilsdb.Model
-	AccountID      uint      `gorm:"index;not null" json:"account_id"`
-	AccountName    string    `gorm:"size:128;not null" json:"account_name"`
-	AccountEmail   string    `gorm:"size:255;not null;index" json:"account_email"`
 	Trigger        string    `gorm:"size:32;not null" json:"trigger"`
-	Protocol       string    `gorm:"size:16;not null" json:"protocol"`
 	StartedAt      time.Time `gorm:"index" json:"started_at"`
 	FinishedAt     time.Time `gorm:"index" json:"finished_at"`
 	DurationMs     int64     `json:"duration_ms"`
-	NewMessages    int       `json:"new_messages"`
-	MailboxCount   int       `json:"mailbox_count"`
-	Success        bool      `gorm:"index" json:"success"`
-	RetriedOAuth   bool      `json:"retried_oauth"`
+	AccountCount   int       `json:"account_count"`
+	SuccessCount   int       `json:"success_count"`
+	SuccessRate    float64   `json:"success_rate"`
 	SummaryMessage string    `gorm:"type:text" json:"summary_message"`
-	ErrorMessage   string    `gorm:"type:text" json:"error_message"`
+	Details        string    `gorm:"type:text" json:"details"`
 }

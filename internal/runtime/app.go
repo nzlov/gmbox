@@ -89,6 +89,9 @@ func (a *App) Close() {
 
 // migrate 使用自动迁移快速搭起当前版本所需表结构。
 func migrate(db *gorm.DB) error {
+	if err := rebuildLegacySyncLogs(db); err != nil {
+		return err
+	}
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.UserPreference{},
@@ -103,6 +106,20 @@ func migrate(db *gorm.DB) error {
 		&model.SyncLog{},
 	); err != nil {
 		return fmt.Errorf("自动迁移失败: %w", err)
+	}
+	return nil
+}
+
+// rebuildLegacySyncLogs 检测旧版同步日志表结构并重建，避免聚合日志上线后继续受旧非空列约束影响。
+func rebuildLegacySyncLogs(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.SyncLog{}) {
+		return nil
+	}
+	if db.Migrator().HasColumn(&model.SyncLog{}, "details") {
+		return nil
+	}
+	if err := db.Migrator().DropTable(&model.SyncLog{}); err != nil {
+		return fmt.Errorf("重建旧版同步日志表失败: %w", err)
 	}
 	return nil
 }

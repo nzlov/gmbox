@@ -138,22 +138,27 @@ export interface ContactListResponse {
   page_size: number
 }
 
-export interface SyncLogItem {
-  id: number
+export interface SyncLogDetailItem {
   account_id: number
   account_name: string
   account_email: string
+  success: boolean
+  new_messages: number
+  duration_ms: number
+  error_message: string
+}
+
+export interface SyncLogItem {
+  id: number
   trigger: string
-  protocol: string
   started_at: string
   finished_at: string
   duration_ms: number
-  new_messages: number
-  mailbox_count: number
-  success: boolean
-  retried_oauth: boolean
+  account_count: number
+  success_count: number
+  success_rate: number
   summary_message: string
-  error_message: string
+  details: SyncLogDetailItem[]
 }
 
 export interface SyncLogListResponse {

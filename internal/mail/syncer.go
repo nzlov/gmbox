@@ -2,13 +2,15 @@ package mail
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
-	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 
 	appcfg "gmbox/internal/config"
@@ -63,31 +65,59 @@ func (s *Syncer) Stop() {
 	}
 }
 
-// RunOnce 主动执行一轮同步，供手动触发和定时任务共用。
+// RunOnce 主动执行一轮全邮箱同步，并把本轮所有邮箱结果汇总成一条日志。
 func (s *Syncer) RunOnce(ctx context.Context) error {
 	var accounts []model.MailAccount
 	if err := s.db.Where("enabled = ?", true).Find(&accounts).Error; err != nil {
 		return err
 	}
+	return s.runAccounts(ctx, accounts, "cron")
+}
+
+// RunAccountsNow 手动同步多个邮箱，并把结果写成一条聚合日志。
+func (s *Syncer) RunAccountsNow(ctx context.Context, accounts []model.MailAccount) error {
+	return s.runAccounts(ctx, accounts, "manual")
+}
+
+// runAccounts 统一处理批量同步执行和聚合日志落库，避免手动与定时链路口径不一致。
+func (s *Syncer) runAccounts(ctx context.Context, accounts []model.MailAccount, trigger string) error {
 	if len(accounts) == 0 {
 		return nil
 	}
+	start := time.Now()
 	sem := make(chan struct{}, s.cfg.Mail.MaxConcurrency)
-	g, runCtx := errgroup.WithContext(ctx)
+	results := make([]model.SyncLogDetail, 0, len(accounts))
+	var failed []string
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 	for _, account := range accounts {
 		account := account
-		g.Go(func() error {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			return s.syncAccount(runCtx, account, "cron")
-		})
+			result, err := s.syncAccount(ctx, account)
+			mu.Lock()
+			results = append(results, result)
+			if err != nil {
+				failed = append(failed, account.Email)
+			}
+			mu.Unlock()
+		}()
 	}
-	return g.Wait()
+	wg.Wait()
+	finished := time.Now()
+	s.writeSyncLog(trigger, start, finished, results)
+	if len(failed) > 0 {
+		return fmt.Errorf("以下邮箱同步失败: %s", strings.Join(failed, ", "))
+	}
+	return nil
 }
 
-// RunAccountNow 手动同步单个邮箱，便于前端在账户详情页即时触发。
+// RunAccountNow 手动同步单个邮箱，并按统一聚合格式写一条日志。
 func (s *Syncer) RunAccountNow(ctx context.Context, account model.MailAccount) error {
-	return s.syncAccount(ctx, account, "manual")
+	return s.runAccounts(ctx, []model.MailAccount{account}, "manual")
 }
 
 // runSyncAttempt 执行单次协议同步，便于 OAuth 失败后复用同一入口重试。
@@ -122,38 +152,60 @@ func shouldRetryOAuthSync(err error) bool {
 	return false
 }
 
-// writeSyncLog 将单次同步结果写入历史表，便于排查和展示。
-func (s *Syncer) writeSyncLog(account model.MailAccount, trigger string, startedAt time.Time, finishedAt time.Time, result *SyncResult, retriedOAuth bool, err error, summary string) {
+// summarizeSyncLog 统一生成聚合文案，避免前后端各自重复计算成功率摘要。
+func summarizeSyncLog(results []model.SyncLogDetail) (int, int, float64, string) {
+	accountCount := len(results)
+	if accountCount == 0 {
+		return 0, 0, 0, "本轮没有可同步的邮箱"
+	}
+	successCount := 0
+	for _, item := range results {
+		if item.Success {
+			successCount++
+		}
+	}
+	successRate := float64(successCount) / float64(accountCount) * 100
+	return accountCount, successCount, successRate, fmt.Sprintf("本轮同步 %d 个邮箱，成功 %d 个，成功率 %.0f%%", accountCount, successCount, successRate)
+}
+
+// writeSyncLog 将整轮同步结果聚合写入历史表，避免多邮箱同步时刷出大量单邮箱日志。
+func (s *Syncer) writeSyncLog(trigger string, startedAt time.Time, finishedAt time.Time, results []model.SyncLogDetail) {
+	sort.Slice(results, func(i int, j int) bool {
+		return results[i].AccountEmail < results[j].AccountEmail
+	})
+	accountCount, successCount, successRate, summary := summarizeSyncLog(results)
+	details, err := json.Marshal(results)
+	if err != nil {
+		summary = summary + "，但明细序列化失败"
+		details = []byte("[]")
+	}
 	logEntry := model.SyncLog{
-		AccountID:      account.Model.ID,
-		AccountName:    account.Name,
-		AccountEmail:   account.Email,
 		Trigger:        trigger,
-		Protocol:       account.IncomingProtocol,
 		StartedAt:      startedAt,
 		FinishedAt:     finishedAt,
 		DurationMs:     finishedAt.Sub(startedAt).Milliseconds(),
-		Success:        err == nil,
-		RetriedOAuth:   retriedOAuth,
+		AccountCount:   accountCount,
+		SuccessCount:   successCount,
+		SuccessRate:    successRate,
 		SummaryMessage: summary,
-	}
-	if result != nil {
-		logEntry.NewMessages = result.NewMessages
-		logEntry.MailboxCount = result.MailboxCount
-	}
-	if err != nil {
-		logEntry.ErrorMessage = err.Error()
+		Details:        string(details),
 	}
 	_ = s.db.Create(&logEntry).Error
 }
 
-// syncAccount 当前先落同步骨架，确保状态机、并发控制和接口可用。
-
-func (s *Syncer) syncAccount(ctx context.Context, account model.MailAccount, trigger string) error {
+// syncAccount 执行单邮箱同步，并返回写入聚合日志所需的最小明细结果。
+func (s *Syncer) syncAccount(ctx context.Context, account model.MailAccount) (model.SyncLogDetail, error) {
 	start := time.Now()
+	logDetail := model.SyncLogDetail{
+		AccountID:    account.Model.ID,
+		AccountName:  account.Name,
+		AccountEmail: account.Email,
+	}
 	state := model.SyncState{AccountID: account.Model.ID}
 	if err := s.db.Where("account_id = ?", account.Model.ID).FirstOrCreate(&state, model.SyncState{AccountID: account.Model.ID}).Error; err != nil {
-		return err
+		logDetail.DurationMs = time.Since(start).Milliseconds()
+		logDetail.ErrorMessage = err.Error()
+		return logDetail, err
 	}
 
 	now := time.Now()
@@ -179,6 +231,10 @@ func (s *Syncer) syncAccount(ctx context.Context, account model.MailAccount, tri
 	state.LastSyncAt = &finished
 	state.LastDuration = time.Since(start).Milliseconds()
 	state.LastMessageAt = &finished
+	logDetail.DurationMs = finished.Sub(start).Milliseconds()
+	if result != nil {
+		logDetail.NewMessages = result.NewMessages
+	}
 	if err != nil {
 		state.LastStatus = "error"
 		state.LastError = err.Error()
@@ -188,8 +244,8 @@ func (s *Syncer) syncAccount(ctx context.Context, account model.MailAccount, tri
 			state.LastMessage = "同步执行失败"
 		}
 		_ = s.db.Save(&state).Error
-		s.writeSyncLog(account, trigger, start, finished, result, retriedOAuth, err, state.LastMessage)
-		return err
+		logDetail.ErrorMessage = err.Error()
+		return logDetail, err
 	}
 	state.LastStatus = "ok"
 	state.LastError = ""
@@ -200,8 +256,9 @@ func (s *Syncer) syncAccount(ctx context.Context, account model.MailAccount, tri
 		state.LastMessage = state.LastMessage + "（期间已自动刷新 OAuth token 并重试成功）"
 	}
 	if saveErr := s.db.Save(&state).Error; saveErr != nil {
-		return saveErr
+		logDetail.ErrorMessage = saveErr.Error()
+		return logDetail, saveErr
 	}
-	s.writeSyncLog(account, trigger, start, finished, result, retriedOAuth, nil, state.LastMessage)
-	return nil
+	logDetail.Success = true
+	return logDetail, nil
 }
